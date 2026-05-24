@@ -1,0 +1,36 @@
+[package]
+name = "advanced-notebook"
+version = "1.0.0"
+description = "Advanced Notebook — video structure and notes desktop app"
+authors = ["Advanced Notebook"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.70"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "advanced-notebook"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "1.5.0", features = [] }
+
+[dependencies]
+serde        = { version = "1.0", features = ["derive"] }
+serde_json   = "1.0"
+tauri        = { version = "1.5.0", features = ["shell-open", "path-all", "fs-all"] }
+tauri-plugin-sql = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1", features = ["sqlite"] }
+
+[profile.release]
+# Smaller, faster binary
+opt-level     = 3
+lto           = true
+codegen-units = 1
+panic         = "abort"
+strip         = true
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

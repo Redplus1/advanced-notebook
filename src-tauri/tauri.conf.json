@@ -1,0 +1,108 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "Advanced Notebook",
+    "version": "1.0.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      },
+      "path": {
+        "all": true
+      },
+      "fs": {
+        "all": true,
+        "scope": [
+          "$APPDATA/*",
+          "$APPCONFIG/*",
+          "$APPDATA/**",
+          "$APPLOCALDATA/**"
+        ]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "targets": [
+        "app"
+      ],
+      "identifier": "com.advancednotebook.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "shortDescription": "Advanced video structure & notes application",
+      "longDescription": "Advanced Notebook \u2014 desktop app for creating video structure, notes, and visual blueprints.",
+      "copyright": "Copyright \u00a9 2025 Advanced Notebook",
+      "category": "Productivity",
+      "resources": [],
+      "externalBin": [],
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "wix": {
+          "language": "en-US",
+          "bannerPath": "installer-assets/wix-banner.png",
+          "dialogImagePath": "installer-assets/wix-dialog.png",
+          "template": null,
+          "fragmentPaths": [],
+          "componentGroupRefs": [],
+          "componentRefs": [],
+          "featureGroupRefs": [],
+          "featureRefs": [],
+          "mergeRefs": [],
+          "skipWebviewInstall": false
+        }
+      },
+      "macOS": {
+        "frameworks": [],
+        "minimumSystemVersion": "10.13",
+        "exceptionDomain": null,
+        "signingIdentity": null,
+        "providerShortName": null,
+        "entitlements": null
+      },
+      "deb": {
+        "depends": []
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "updater": {
+      "active": false
+    },
+    "windows": [
+      {
+        "label": "main",
+        "fullscreen": false,
+        "resizable": true,
+        "title": "Advanced Notebook",
+        "width": 1200,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 540,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "skipTaskbar": false,
+        "visible": false,
+        "fileDropEnabled": false
+      }
+    ]
+  }
+}
