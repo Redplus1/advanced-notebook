@@ -1,0 +1,445 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme CSS variables ──────────────────────────────────────────────────── */
+
+:root,
+[data-theme="dark"] {
+  --c-bg:         #0a0a0b;
+  --c-surface:    #0d0d0f;
+  --c-elevated:   #131316;
+  --c-card:       #18181b;
+  --c-border:     #27272a;
+  --c-border-sub: #1c1c1f;
+  --c-text-1:     #f4f4f5;
+  --c-text-2:     #d4d4d8;
+  --c-text-3:     #71717a;
+  --c-text-4:     #3f3f46;
+  --c-accent:     #6366f1;
+  --c-rf-dot:     #1c1c1f;
+  --c-accent-focus-ring: rgba(99,102,241,0.15);
+  color-scheme: dark;
+
+  /* Highlight marker colors — dark theme: muted, not blinding */
+  --hl-yellow-bg:   rgba(250, 204, 21, 0.22);
+  --hl-yellow-text: #fde68a;
+  --hl-yellow-dot:  #fbbf24;
+
+  --hl-green-bg:    rgba(34, 197, 94, 0.18);
+  --hl-green-text:  #86efac;
+  --hl-green-dot:   #4ade80;
+
+  --hl-blue-bg:     rgba(99, 102, 241, 0.22);
+  --hl-blue-text:   #c7d2fe;
+  --hl-blue-dot:    #818cf8;
+
+  --hl-pink-bg:     rgba(236, 72, 153, 0.20);
+  --hl-pink-text:   #fbcfe8;
+  --hl-pink-dot:    #f472b6;
+
+  --hl-orange-bg:   rgba(249, 115, 22, 0.20);
+  --hl-orange-text: #fed7aa;
+  --hl-orange-dot:  #fb923c;
+
+  --hl-purple-bg:   rgba(168, 85, 247, 0.20);
+  --hl-purple-text: #e9d5ff;
+  --hl-purple-dot:  #c084fc;
+}
+
+[data-theme="midnight"] {
+  --c-bg:         #07091a;
+  --c-surface:    #0a0d22;
+  --c-elevated:   #10142e;
+  --c-card:       #151a38;
+  --c-border:     #1e2850;
+  --c-border-sub: #141840;
+  --c-text-1:     #e8efff;
+  --c-text-2:     #b0c2ee;
+  --c-text-3:     #5870b8;
+  --c-text-4:     #2a3870;
+  --c-accent:     #7b8fff;
+  --c-rf-dot:     #111530;
+  --c-accent-focus-ring: rgba(123,143,255,0.15);
+  color-scheme: dark;
+
+  /* Midnight: cool blue tints */
+  --hl-yellow-bg:   rgba(251, 191, 36, 0.20);
+  --hl-yellow-text: #fde68a;
+  --hl-yellow-dot:  #fbbf24;
+
+  --hl-green-bg:    rgba(52, 211, 153, 0.18);
+  --hl-green-text:  #a7f3d0;
+  --hl-green-dot:   #34d399;
+
+  --hl-blue-bg:     rgba(123, 143, 255, 0.25);
+  --hl-blue-text:   #c7d2fe;
+  --hl-blue-dot:    #7b8fff;
+
+  --hl-pink-bg:     rgba(244, 114, 182, 0.20);
+  --hl-pink-text:   #fbcfe8;
+  --hl-pink-dot:    #f472b6;
+
+  --hl-orange-bg:   rgba(251, 146, 60, 0.20);
+  --hl-orange-text: #fed7aa;
+  --hl-orange-dot:  #fb923c;
+
+  --hl-purple-bg:   rgba(192, 132, 252, 0.22);
+  --hl-purple-text: #e9d5ff;
+  --hl-purple-dot:  #c084fc;
+}
+
+[data-theme="soft-light"] {
+  --c-bg:         #f6f4ef;
+  --c-surface:    #edeae3;
+  --c-elevated:   #e5e2da;
+  --c-card:       #dedad0;
+  --c-border:     #c8c5bc;
+  --c-border-sub: #d4d1c8;
+  --c-text-1:     #18161a;
+  --c-text-2:     #2e2c2a;
+  --c-text-3:     #6a6866;
+  --c-text-4:     #9a9896;
+  --c-accent:     #5558d8;
+  --c-rf-dot:     #d0cdc4;
+  --c-accent-focus-ring: rgba(85,88,216,0.10);
+  color-scheme: light;
+
+  /* Soft light: warm, readable contrast */
+  --hl-yellow-bg:   #fef08a;
+  --hl-yellow-text: #713f12;
+  --hl-yellow-dot:  #eab308;
+
+  --hl-green-bg:    #bbf7d0;
+  --hl-green-text:  #14532d;
+  --hl-green-dot:   #22c55e;
+
+  --hl-blue-bg:     #bfdbfe;
+  --hl-blue-text:   #1e3a8a;
+  --hl-blue-dot:    #3b82f6;
+
+  --hl-pink-bg:     #fbcfe8;
+  --hl-pink-text:   #831843;
+  --hl-pink-dot:    #ec4899;
+
+  --hl-orange-bg:   #fed7aa;
+  --hl-orange-text: #7c2d12;
+  --hl-orange-dot:  #f97316;
+
+  --hl-purple-bg:   #e9d5ff;
+  --hl-purple-text: #4c1d95;
+  --hl-purple-dot:  #a855f7;
+}
+
+[data-theme="pastel-rose"] {
+  --c-bg:         #fef6f9;
+  --c-surface:    #f8ecf2;
+  --c-elevated:   #f0e0ea;
+  --c-card:       #e8d4e4;
+  --c-border:     #d4b8ce;
+  --c-border-sub: #e0c8d8;
+  --c-text-1:     #261420;
+  --c-text-2:     #42283a;
+  --c-text-3:     #8a6080;
+  --c-text-4:     #bca0b8;
+  --c-accent:     #c85890;
+  --c-rf-dot:     #e0c8d8;
+  --c-accent-focus-ring: rgba(200,88,144,0.10);
+  color-scheme: light;
+
+  /* Rose pastel: harmonious warm tones */
+  --hl-yellow-bg:   #fef9c3;
+  --hl-yellow-text: #854d0e;
+  --hl-yellow-dot:  #eab308;
+
+  --hl-green-bg:    #dcfce7;
+  --hl-green-text:  #166534;
+  --hl-green-dot:   #4ade80;
+
+  --hl-blue-bg:     #dbeafe;
+  --hl-blue-text:   #1e3a8a;
+  --hl-blue-dot:    #60a5fa;
+
+  --hl-pink-bg:     #fce7f3;
+  --hl-pink-text:   #9d174d;
+  --hl-pink-dot:    #c85890;
+
+  --hl-orange-bg:   #ffedd5;
+  --hl-orange-text: #9a3412;
+  --hl-orange-dot:  #fb923c;
+
+  --hl-purple-bg:   #f3e8ff;
+  --hl-purple-text: #581c87;
+  --hl-purple-dot:  #c084fc;
+}
+
+[data-theme="pastel-mint"] {
+  --c-bg:         #f2faf8;
+  --c-surface:    #e6f5f0;
+  --c-elevated:   #d8ede8;
+  --c-card:       #c8e4dc;
+  --c-border:     #a8d0c8;
+  --c-border-sub: #bcddd5;
+  --c-text-1:     #102820;
+  --c-text-2:     #1e3c30;
+  --c-text-3:     #508878;
+  --c-text-4:     #88b8ac;
+  --c-accent:     #1f7a68;
+  --c-rf-dot:     #c0dcd4;
+  --c-accent-focus-ring: rgba(31,122,104,0.12);
+  color-scheme: light;
+
+  /* Mint: cool green-tinted highlights */
+  --hl-yellow-bg:   #fef9c3;
+  --hl-yellow-text: #713f12;
+  --hl-yellow-dot:  #ca8a04;
+
+  --hl-green-bg:    #bbf7d0;
+  --hl-green-text:  #14532d;
+  --hl-green-dot:   #1f7a68;
+
+  --hl-blue-bg:     #cffafe;
+  --hl-blue-text:   #164e63;
+  --hl-blue-dot:    #0891b2;
+
+  --hl-pink-bg:     #fce7f3;
+  --hl-pink-text:   #831843;
+  --hl-pink-dot:    #db2777;
+
+  --hl-orange-bg:   #fed7aa;
+  --hl-orange-text: #7c2d12;
+  --hl-orange-dot:  #ea580c;
+
+  --hl-purple-bg:   #e0e7ff;
+  --hl-purple-text: #3730a3;
+  --hl-purple-dot:  #6366f1;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+  html, body, #root {
+    height: 100%; margin: 0; padding: 0;
+    background: var(--c-bg);
+    color: var(--c-text-2);
+    font-family: "IBM Plex Sans", sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--c-text-4); }
+
+  ::selection { background: var(--c-accent); color: #fff; opacity: 0.3; }
+}
+
+/* ─── Utilities ────────────────────────────────────────────────────────────── */
+
+@layer utilities {
+  .text-select   { user-select: text; }
+  .no-drag       { -webkit-app-region: no-drag; }
+  .drag          { -webkit-app-region: drag; }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .bg-indigo-500\/8 { background-color: rgb(99 102 241 / 0.08); }
+}
+
+/* ─── Soft-light / Pastel overrides for zinc Tailwind classes ─────────────── */
+
+[data-theme="soft-light"],
+[data-theme="pastel-rose"],
+[data-theme="pastel-mint"] {
+  /* Flip zinc surface colors */
+}
+
+[data-theme="soft-light"] .bg-zinc-900\/80,
+[data-theme="soft-light"] .bg-zinc-900\/95,
+[data-theme="soft-light"] .bg-zinc-900\/90 { background-color: rgba(220,216,208,0.9) !important; }
+
+[data-theme="soft-light"] .bg-zinc-900    { background-color: var(--c-elevated) !important; }
+[data-theme="soft-light"] .bg-zinc-800    { background-color: var(--c-card) !important; }
+[data-theme="soft-light"] .bg-zinc-800\/80 { background-color: rgba(220,218,210,0.8) !important; }
+[data-theme="soft-light"] .bg-zinc-800\/60 { background-color: rgba(220,218,210,0.6) !important; }
+[data-theme="soft-light"] .bg-zinc-900\/60 { background-color: rgba(228,225,218,0.6) !important; }
+[data-theme="soft-light"] .bg-zinc-900\/40 { background-color: rgba(232,229,222,0.6) !important; }
+[data-theme="soft-light"] .bg-zinc-900\/50 { background-color: rgba(232,229,222,0.7) !important; }
+[data-theme="soft-light"] .bg-zinc-700    { background-color: #ccc9c0 !important; }
+[data-theme="soft-light"] .bg-zinc-700\/60 { background-color: rgba(200,197,188,0.6) !important; }
+
+[data-theme="soft-light"] .border-zinc-900   { border-color: var(--c-border-sub) !important; }
+[data-theme="soft-light"] .border-zinc-800   { border-color: var(--c-border) !important; }
+[data-theme="soft-light"] .border-zinc-800\/80 { border-color: rgba(200,197,188,0.8) !important; }
+[data-theme="soft-light"] .border-zinc-800\/60 { border-color: rgba(200,197,188,0.6) !important; }
+[data-theme="soft-light"] .border-zinc-700   { border-color: #aaa7a0 !important; }
+
+[data-theme="soft-light"] .text-zinc-100   { color: var(--c-text-1) !important; }
+[data-theme="soft-light"] .text-zinc-200   { color: var(--c-text-1) !important; }
+[data-theme="soft-light"] .text-zinc-300   { color: var(--c-text-2) !important; }
+[data-theme="soft-light"] .text-zinc-400   { color: var(--c-text-2) !important; }
+[data-theme="soft-light"] .text-zinc-500   { color: var(--c-text-3) !important; }
+[data-theme="soft-light"] .text-zinc-600   { color: var(--c-text-3) !important; }
+[data-theme="soft-light"] .text-zinc-700   { color: var(--c-text-4) !important; }
+[data-theme="soft-light"] .text-zinc-800   { color: var(--c-text-4) !important; }
+[data-theme="soft-light"] .placeholder-zinc-700::placeholder { color: var(--c-text-4) !important; }
+[data-theme="soft-light"] .placeholder-zinc-700 { color: var(--c-text-4); }
+
+/* Midnight overrides */
+[data-theme="midnight"] .bg-zinc-900    { background-color: var(--c-elevated) !important; }
+[data-theme="midnight"] .bg-zinc-800    { background-color: var(--c-card) !important; }
+[data-theme="midnight"] .border-zinc-900 { border-color: var(--c-border-sub) !important; }
+[data-theme="midnight"] .border-zinc-800 { border-color: var(--c-border) !important; }
+[data-theme="midnight"] .text-zinc-300  { color: var(--c-text-2) !important; }
+[data-theme="midnight"] .text-zinc-400  { color: #8090c8 !important; }
+[data-theme="midnight"] .text-zinc-500  { color: #6070a8 !important; }
+[data-theme="midnight"] .text-zinc-600  { color: var(--c-text-3) !important; }
+[data-theme="midnight"] .text-zinc-700  { color: var(--c-text-4) !important; }
+
+/* Pastel Rose overrides */
+[data-theme="pastel-rose"] .bg-zinc-900    { background-color: var(--c-elevated) !important; }
+[data-theme="pastel-rose"] .bg-zinc-800    { background-color: var(--c-card) !important; }
+[data-theme="pastel-rose"] .bg-zinc-900\/80, [data-theme="pastel-rose"] .bg-zinc-900\/95 { background-color: rgba(240,224,234,0.92) !important; }
+[data-theme="pastel-rose"] .bg-zinc-900\/40 { background-color: rgba(240,224,234,0.5) !important; }
+[data-theme="pastel-rose"] .bg-zinc-900\/50 { background-color: rgba(240,224,234,0.6) !important; }
+[data-theme="pastel-rose"] .bg-zinc-800\/80 { background-color: rgba(232,212,228,0.8) !important; }
+[data-theme="pastel-rose"] .border-zinc-900  { border-color: var(--c-border-sub) !important; }
+[data-theme="pastel-rose"] .border-zinc-800  { border-color: var(--c-border) !important; }
+[data-theme="pastel-rose"] .text-zinc-100, [data-theme="pastel-rose"] .text-zinc-200, [data-theme="pastel-rose"] .text-zinc-300 { color: var(--c-text-2) !important; }
+[data-theme="pastel-rose"] .text-zinc-400  { color: var(--c-text-2) !important; }
+[data-theme="pastel-rose"] .text-zinc-500  { color: var(--c-text-3) !important; }
+[data-theme="pastel-rose"] .text-zinc-600  { color: var(--c-text-3) !important; }
+[data-theme="pastel-rose"] .text-zinc-700  { color: var(--c-text-4) !important; }
+
+/* Pastel Mint overrides */
+[data-theme="pastel-mint"] .bg-zinc-900    { background-color: var(--c-elevated) !important; }
+[data-theme="pastel-mint"] .bg-zinc-800    { background-color: var(--c-card) !important; }
+[data-theme="pastel-mint"] .bg-zinc-900\/80, [data-theme="pastel-mint"] .bg-zinc-900\/95 { background-color: rgba(216,237,232,0.92) !important; }
+[data-theme="pastel-mint"] .bg-zinc-900\/40 { background-color: rgba(216,237,232,0.5) !important; }
+[data-theme="pastel-mint"] .bg-zinc-900\/50 { background-color: rgba(216,237,232,0.6) !important; }
+[data-theme="pastel-mint"] .bg-zinc-800\/80 { background-color: rgba(200,228,220,0.8) !important; }
+[data-theme="pastel-mint"] .border-zinc-900  { border-color: var(--c-border-sub) !important; }
+[data-theme="pastel-mint"] .border-zinc-800  { border-color: var(--c-border) !important; }
+[data-theme="pastel-mint"] .text-zinc-100, [data-theme="pastel-mint"] .text-zinc-200, [data-theme="pastel-mint"] .text-zinc-300 { color: var(--c-text-2) !important; }
+[data-theme="pastel-mint"] .text-zinc-400  { color: var(--c-text-2) !important; }
+[data-theme="pastel-mint"] .text-zinc-500  { color: var(--c-text-3) !important; }
+[data-theme="pastel-mint"] .text-zinc-600  { color: var(--c-text-3) !important; }
+[data-theme="pastel-mint"] .text-zinc-700  { color: var(--c-text-4) !important; }
+
+/* ─── React Flow dark theme ────────────────────────────────────────────────── */
+
+.react-flow { background: var(--c-bg) !important; }
+.react-flow__background { background: var(--c-bg) !important; }
+
+.react-flow__edge-path,
+.react-flow__connection-path { stroke: #52525b; stroke-width: 1.5; }
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path { stroke: var(--c-accent); stroke-width: 2; }
+
+.react-flow__handle {
+  width: 10px !important; height: 10px !important;
+  background: transparent !important;
+  border: 1.5px solid transparent !important;
+  transition: background 0.18s, border-color 0.18s, transform 0.18s, opacity 0.18s !important;
+  opacity: 0 !important;
+}
+/* Handles appear when hovering the node */
+.react-flow__node:hover .react-flow__handle {
+  opacity: 0.45 !important;
+  background: var(--c-text-4) !important;
+  border-color: var(--c-text-4) !important;
+}
+/* Full accent when hovering the handle itself */
+.react-flow__handle:hover,
+.react-flow__handle.connecting {
+  opacity: 1 !important;
+  background: var(--c-accent) !important;
+  border-color: var(--c-accent) !important;
+  transform: scale(1.35) !important;
+}
+
+.react-flow__controls {
+  background: var(--c-card) !important;
+  border: 1px solid var(--c-border) !important;
+  border-radius: 10px !important; overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+}
+.react-flow__controls-button {
+  background: var(--c-card) !important;
+  border-bottom: 1px solid var(--c-border) !important;
+  fill: var(--c-text-3) !important;
+  width: 28px !important; height: 28px !important;
+}
+.react-flow__controls-button:hover { background: var(--c-elevated) !important; fill: var(--c-text-1) !important; }
+.react-flow__controls-button svg { fill: inherit !important; }
+.react-flow__attribution { display: none !important; }
+.react-flow__node { cursor: default; }
+.react-flow__node.dragging { cursor: grabbing; }
+
+/* ── Remove default RF node outline/box-shadow on select ── */
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.react-flow__node.selected > div,
+.react-flow__node.selected > * {
+  outline: none !important;
+}
+/* Remove the default blue box-shadow RF adds to selected nodes */
+.react-flow__node-videoBlock > div { box-shadow: none !important; }
+.react-flow__selection,
+.react-flow__nodesselection-rect {
+  background: rgba(99,102,241,0.05) !important;
+  border: 1px solid rgba(99,102,241,0.35) !important;
+}
+.react-flow__resize-control.handle {
+  background: var(--c-accent) !important;
+  border-color: var(--c-accent) !important;
+}
+.react-flow__resize-control.line {
+  border-color: rgba(99,102,241,0.5) !important;
+}
+
+/* Textarea in marker mode — text transparent but selection visible */
+textarea.marker-select::selection {
+  background: var(--c-accent);
+  color: transparent;
+}
+textarea.marker-select::-moz-selection {
+  background: var(--c-accent);
+  color: transparent;
+}
+
+textarea { min-height: 40px; }
+
+/* Remove default browser outlines everywhere */
+*:focus          { outline: none; }
+*:focus-visible  { outline: none; }
+
+/* Textarea in notes editor — beautiful themed focus indicator */
+textarea.notes-editor:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Input fields — subtle bottom accent line instead of outline */
+input[type="text"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Scrollable containers — no outline on click */
+div:focus { outline: none; }
+
+button, input, textarea, select {
+  transition: background 0.12s ease, border-color 0.12s ease,
+              color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}

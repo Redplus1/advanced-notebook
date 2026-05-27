@@ -1,0 +1,10 @@
+node_modules/
+src-tauri/target/
+src-tauri/models/
+src-tauri/libs/
+dist/
+.DS_Store
+*.dylib
+*.bin
+*.zip
+/tmp/
