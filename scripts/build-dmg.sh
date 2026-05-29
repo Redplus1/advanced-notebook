@@ -25,7 +25,8 @@ find src-tauri/target -name "rw.*.dmg" -delete 2>/dev/null || true
 rm -f "$DMG_OUT"
 
 echo "==> Building .app bundle..."
-npm run tauri:build -- --target "$TARGET"
+# --bundles app — собирает только .app, без Tauri DMG bundler (не трогает tauri.conf.json, кэш не сбрасывается)
+npm run tauri:build -- --target "$TARGET" --bundles app
 
 if [ ! -d "$APP_PATH" ]; then
   echo "ERROR: .app not found at $APP_PATH"
