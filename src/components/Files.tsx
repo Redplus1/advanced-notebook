@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useMemo } from "react";
 import { Plus, Trash2, FolderOpen, File, FileText, Film, Music, Archive, Image as ImageIcon,
          ChevronLeft, Upload, Edit2, Check, X, Download, Search, Grid, List } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
@@ -168,11 +168,14 @@ export const Files: React.FC = () => {
 
   const currentFolder = folders.find(f => f.id === activeFolder);
 
-  const visibleFiles = files.filter(f => {
-    const inFolder = activeFolder ? f.folderId === activeFolder : true;
-    const matchSearch = !search.trim() || f.name.toLowerCase().includes(search.toLowerCase());
-    return inFolder && matchSearch;
-  });
+  const visibleFiles = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return files.filter(f => {
+      const inFolder = activeFolder ? f.folderId === activeFolder : true;
+      const matchSearch = !q || f.name.toLowerCase().includes(q);
+      return inFolder && matchSearch;
+    });
+  }, [files, activeFolder, search]);
 
   // ── Upload ────────────────────────────────────────────────────────────────────
 

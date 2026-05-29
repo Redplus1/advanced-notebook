@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar, Trash2, RotateCcw } from "lucide-react";
 import { t, useLang } from "../i18n";
 
@@ -301,18 +301,16 @@ export const Tasks: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(today());
   const [weekAnchor, setWeekAnchor] = useState(today());
 
-  const weekDays = getWeekDays(weekAnchor);
+  const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
   const isToday = selectedDate === today();
 
-  const updateDay = (data: DayData) => {
-    const next = { ...allData, [data.date]: data };
-    setAllData(next);
-    save(next);
-  };
+  const updateDay = useCallback((data: DayData) => {
+    setAllData(prev => { const next = { ...prev, [data.date]: data }; save(next); return next; });
+  }, []);
 
-  const prevWeek = () => setWeekAnchor(a => addDays(a, -7));
-  const nextWeek = () => setWeekAnchor(a => addDays(a, 7));
-  const goToday  = () => { setWeekAnchor(today()); setSelectedDate(today()); };
+  const prevWeek = useCallback(() => setWeekAnchor(a => addDays(a, -7)), []);
+  const nextWeek = useCallback(() => setWeekAnchor(a => addDays(a, 7)),  []);
+  const goToday  = useCallback(() => { setWeekAnchor(today()); setSelectedDate(today()); }, []);
 
   const todayStr = today();
 

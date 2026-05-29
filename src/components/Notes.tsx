@@ -145,14 +145,14 @@ const TagRow: React.FC<{ value: string; onChange: (v: string) => void }> = ({ va
   );
 };
 
-// ─── NoteItem — memoized so it only re-renders when its own note changes ────────
+// ─── NoteItem — stable callbacks via id, not inline closures ────────────────────
 
-const NoteItem = memo<{ note: Note; active: boolean; onSelect: () => void; onDelete: () => void }>(
+const NoteItem = memo<{ note: Note; active: boolean; onSelect: (id: string) => void; onDelete: (id: string) => void }>(
   ({ note, active, onSelect, onDelete }) => {
     const preview = note.content.replace(/\s+/g, " ").trim().slice(0, 75);
     const tags = note.tags ? note.tags.split(",").filter(s => s.trim()).slice(0, 2) : [];
     return (
-      <div onClick={onSelect} className="group relative flex flex-col gap-1 px-4 py-3 cursor-pointer border-b transition-all duration-100"
+      <div onClick={() => onSelect(note.id)} className="group relative flex flex-col gap-1 px-4 py-3 cursor-pointer border-b transition-all duration-100"
         style={{ borderColor: "var(--c-border-sub)", background: active ? "var(--c-elevated)" : "transparent" }}
         onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--c-elevated)88"; }}
         onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}>
@@ -161,7 +161,7 @@ const NoteItem = memo<{ note: Note; active: boolean; onSelect: () => void; onDel
           <p className="text-[12.5px] font-500 leading-snug truncate" style={{ color: active ? "var(--c-text-1)" : "var(--c-text-2)" }}>
             {note.title || <span className="italic font-400" style={{ color: "var(--c-text-4)" }}>{t("untitled")}</span>}
           </p>
-          <button onClick={e => { e.stopPropagation(); onDelete(); }} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all mt-0.5"
+          <button onClick={e => { e.stopPropagation(); onDelete(note.id); }} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all mt-0.5"
             style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}
             onMouseEnter={e => e.currentTarget.style.color = "#f43f5e"}
             onMouseLeave={e => e.currentTarget.style.color = "var(--c-text-4)"}>
@@ -179,6 +179,55 @@ const NoteItem = memo<{ note: Note; active: boolean; onSelect: () => void; onDel
     );
   }
 );
+
+// ─── NotesSidebarPanel — memoized: never re-renders while user is typing ────────
+
+const NotesSidebarPanel = memo<{
+  width: number;
+  noteCount: number;
+  search: string;
+  filtered: Note[];
+  selectedId: string | null;
+  onSearch: React.Dispatch<React.SetStateAction<string>>;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  onCreate: () => void;
+}>(({ width, noteCount, search, filtered, selectedId, onSearch, onSelect, onDelete, onCreate }) => (
+  <aside className="flex flex-col h-full border-r"
+    style={{ width, minWidth: 160, maxWidth: 400, background: "var(--c-surface)", borderColor: "var(--c-border-sub)", flexShrink: 0 }}>
+    <div className="flex items-center justify-between px-4 py-3.5 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
+      <span className="text-[13px] font-600 select-none" style={{ color: "var(--c-text-2)" }}>{t("notes")}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>{noteCount}</span>
+        <button onClick={onCreate} className="flex items-center justify-center w-7 h-7 rounded-xl active:scale-90 text-white transition-all" style={{ background: "var(--c-accent)" }}>
+          <Plus size={15} strokeWidth={2.5} />
+        </button>
+      </div>
+    </div>
+    <div className="p-3 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
+      <div className="flex items-center gap-2 px-3 py-2 rounded-2xl" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
+        <Search size={11} style={{ color: "var(--c-text-4)", flexShrink: 0 }} />
+        <input value={search} onChange={e => onSearch(e.target.value)} placeholder={t("search")}
+          className="bg-transparent text-[12px] outline-none w-full text-select" style={{ color: "var(--c-text-2)" }} />
+        {search && <button onClick={() => onSearch("")} style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}><X size={11} /></button>}
+      </div>
+    </div>
+    <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 h-28 select-none px-4">
+          <FileText size={20} strokeWidth={1} style={{ color: "var(--c-text-4)" }} />
+          <span className="text-[11px]" style={{ color: "var(--c-text-3)" }}>{search ? t("no_results") : t("no_notes_title")}</span>
+        </div>
+      ) : filtered.map(note => (
+        <NoteItem key={note.id} note={note} active={selectedId === note.id}
+          onSelect={onSelect} onDelete={onDelete} />
+      ))}
+    </div>
+    <div className="px-4 py-2.5 border-t" style={{ borderColor: "var(--c-border-sub)" }}>
+      <span className="text-[10px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>⌘N</span>
+    </div>
+  </aside>
+));
 
 // ─── ResizeHandle ──────────────────────────────────────────────────────────────
 
@@ -576,40 +625,18 @@ export const Notes: React.FC = () => {
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}>
 
-      {/* Sidebar */}
-      <aside className="flex flex-col h-full border-r" style={{ width: sidebarW, minWidth: 160, maxWidth: 400, background: "var(--c-surface)", borderColor: "var(--c-border-sub)", flexShrink: 0 }}>
-        <div className="flex items-center justify-between px-4 py-3.5 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
-          <span className="text-[13px] font-600 select-none" style={{ color: "var(--c-text-2)" }}>{t("notes")}</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>{notes.length}</span>
-            <button onClick={createNote} className="flex items-center justify-center w-7 h-7 rounded-xl active:scale-90 text-white transition-all" style={{ background: "var(--c-accent)" }}>
-              <Plus size={15} strokeWidth={2.5} />
-            </button>
-          </div>
-        </div>
-        <div className="p-3 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-2xl" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
-            <Search size={11} style={{ color: "var(--c-text-4)", flexShrink: 0 }} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t("search")} className="bg-transparent text-[12px] outline-none w-full text-select" style={{ color: "var(--c-text-2)" }} />
-            {search && <button onClick={() => setSearch("")} style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}><X size={11} /></button>}
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 h-28 select-none px-4">
-              <FileText size={20} strokeWidth={1} style={{ color: "var(--c-text-4)" }} />
-              <span className="text-[11px]" style={{ color: "var(--c-text-3)" }}>{search ? t("no_results") : t("no_notes_title")}</span>
-            </div>
-          ) : filtered.map(note => (
-            <NoteItem key={note.id} note={note} active={selectedId === note.id}
-              onSelect={() => handleSelectNote(note.id)}
-              onDelete={() => handleDeleteNote(note.id)} />
-          ))}
-        </div>
-        <div className="px-4 py-2.5 border-t" style={{ borderColor: "var(--c-border-sub)" }}>
-          <span className="text-[10px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>⌘N</span>
-        </div>
-      </aside>
+      {/* Sidebar — memoized, never re-renders during typing */}
+      <NotesSidebarPanel
+        width={sidebarW}
+        noteCount={notes.length}
+        search={search}
+        filtered={filtered}
+        selectedId={selectedId}
+        onSearch={setSearch}
+        onSelect={handleSelectNote}
+        onDelete={handleDeleteNote}
+        onCreate={createNote}
+      />
 
       <ResizeHandle onResize={dx => setSidebarW(w => Math.max(160, Math.min(400, w + dx)))} />
 
