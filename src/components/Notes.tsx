@@ -265,7 +265,7 @@ function fileExt(name: string): string { return name.split('.').pop() ?? ''; }
 
 // ─── Main Notes ────────────────────────────────────────────────────────────────
 
-export const Notes: React.FC = () => {
+export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
   useLang();
   const [notes, setNotes]       = useState<Note[]>(() => loadNotes());
   const [selectedId, setSelId]  = useState<string | null>(() => loadNotes()[0]?.id ?? null);
@@ -407,8 +407,12 @@ export const Notes: React.FC = () => {
   const createNoteRef = useRef(createNote);
   useEffect(() => { createNoteRef.current = createNote; }, [createNote]);
 
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (!isActiveRef.current) return; // ignore when Notes tab is hidden
       if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); createNoteRef.current(); }
       const s = selRef.current;
       if ((e.metaKey || e.ctrlKey) && e.key === "b" && s.start < s.end) { e.preventDefault(); applyFmtRef.current("bold"); }

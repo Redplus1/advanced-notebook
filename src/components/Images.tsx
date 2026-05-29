@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useMemo } from "react";
 import { Plus, FolderOpen, Trash2, Image as ImageIcon, X, Grid, ChevronLeft, Upload, Edit2, Check } from "lucide-react";
 import { useLang } from "../i18n";
 
@@ -47,9 +47,19 @@ export const Images: React.FC = () => {
   const [editName, setEditName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeImages = activeFolder
-    ? images.filter(i => i.folderId === activeFolder)
-    : images;
+  const activeImages = useMemo(() =>
+    activeFolder ? images.filter(i => i.folderId === activeFolder) : images,
+    [images, activeFolder]
+  );
+
+  // Per-folder image counts — computed once, not inside the map
+  const folderCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const img of images) {
+      counts[img.folderId] = (counts[img.folderId] ?? 0) + 1;
+    }
+    return counts;
+  }, [images]);
 
   // ── File upload ──────────────────────────────────────────────────────────────
 
@@ -137,7 +147,7 @@ export const Images: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto">
           {folders.map(folder => {
-            const count = images.filter(i => i.folderId === folder.id).length;
+            const count = folderCounts[folder.id] ?? 0;
             const isActive = activeFolder === folder.id;
             return (
               <div key={folder.id} className="group relative">

@@ -406,108 +406,68 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
     setEdges(es => es.filter(e => !e.selected));
   }, [setNodes, setEdges]);
 
-  const addAttachment = (files: FileList | null) => {
+  const addAttachment = useCallback((files: FileList | null) => {
     if (!files) return;
-
     for (const file of Array.from(files)) {
-        const isImg = file.type.startsWith("image/");
-        const reader = new FileReader();
-
-        reader.onload = async ev => {
-            let filePath = "";
-
-            try {
-                const buf = await file.arrayBuffer();
-                filePath = await invoke<string>("save_attachment", {
-                noteId: `blueprint_${projectId}`,
-                fileName: file.name,
-                data: Array.from(new Uint8Array(buf)),
-            });
-            } catch {}
-
-            const att: BPAttachment = {
-               id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-                projectId,
-                name: file.name,
-                filePath,
-                thumbUrl: isImg ? String(ev.target?.result ?? "") : "",
-                x: 80,
-                y: 100,
-                w: 240,
-            };
-
-            setAttachments(prev => {
-                const next = {
-                ...prev,
-                [projectId]: [...(prev[projectId] ?? []), att],
-                };
-                saveBPAttachments(next);
-                return next;
-            });
-        };
-
-        if (isImg) {
-            reader.readAsDataURL(file);
-        } else {
-            reader.onload({ target: { result: "" } } as ProgressEvent<FileReader>);
-        }
-     }
-  };
-
-  const openAttachment = async (att: BPAttachment) => {
-        const ext = fileExt(att.name);
-        const isImg = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif"].includes(ext);
-
-        if (isImg && att.thumbUrl) {
-           setLightboxUrl(att.thumbUrl);
-           return;
-         }
-
-        if (!att.filePath) return;
-
+      const isImg = file.type.startsWith("image/");
+      const attId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const reader = new FileReader();
+      reader.onload = async ev => {
+        let filePath = "";
         try {
-            await invoke("open_file_native", { path: att.filePath });
-        } catch (e) {
-            console.error(e);
-        }
-  };
-
-  const removeAttachment = (id: string) => {
+          const buf = await file.arrayBuffer();
+          filePath = await invoke<string>("save_attachment", {
+            noteId: `blueprint_${projectId}`, fileName: file.name,
+            data: Array.from(new Uint8Array(buf)),
+          });
+        } catch {}
+        const att: BPAttachment = {
+          id: attId, projectId, name: file.name, filePath,
+          thumbUrl: isImg ? String(ev.target?.result ?? "") : "",
+          x: 80, y: 100, w: 240,
+        };
         setAttachments(prev => {
-            const next = {
-                ...prev,
-                [projectId]: (prev[projectId] ?? []).filter(a => a.id !== id),
-            };
-            saveBPAttachments(next);
-            return next;
+          const next = { ...prev, [projectId]: [...(prev[projectId] ?? []), att] };
+          saveBPAttachments(next);
+          return next;
         });
-  };
+      };
+      if (isImg) reader.readAsDataURL(file);
+      else reader.onload({ target: { result: "" } } as ProgressEvent<FileReader>);
+    }
+  }, [projectId]);
 
-  const moveAttachment = (id: string, x: number, y: number) => {
-    setAttachments(prev => {
-        const next = {
-            ...prev,
-            [projectId]: (prev[projectId] ?? []).map(a =>
-             a.id === id ? { ...a, x, y } : a
-            ),
-        };
-        saveBPAttachments(next);
-        return next;
-    });
-  };
+  const openAttachment = useCallback(async (att: BPAttachment) => {
+    const ext = fileExt(att.name);
+    const isImg = ["jpg","jpeg","png","gif","webp","svg","bmp","avif"].includes(ext);
+    if (isImg && att.thumbUrl) { setLightboxUrl(att.thumbUrl); return; }
+    if (!att.filePath) return;
+    try { await invoke("open_file_native", { path: att.filePath }); } catch {}
+  }, []);
 
-  const resizeAttachment = (id: string, w: number) => {
+  const removeAttachment = useCallback((id: string) => {
     setAttachments(prev => {
-        const next = {
-            ...prev,
-            [projectId]: (prev[projectId] ?? []).map(a =>
-            a.id === id ? { ...a, w } : a
-            ),
-        };
-        saveBPAttachments(next);
-        return next;
+      const next = { ...prev, [projectId]: (prev[projectId] ?? []).filter(a => a.id !== id) };
+      saveBPAttachments(next);
+      return next;
     });
-  };
+  }, [projectId]);
+
+  const moveAttachment = useCallback((id: string, x: number, y: number) => {
+    setAttachments(prev => {
+      const next = { ...prev, [projectId]: (prev[projectId] ?? []).map(a => a.id === id ? { ...a, x, y } : a) };
+      saveBPAttachments(next);
+      return next;
+    });
+  }, [projectId]);
+
+  const resizeAttachment = useCallback((id: string, w: number) => {
+    setAttachments(prev => {
+      const next = { ...prev, [projectId]: (prev[projectId] ?? []).map(a => a.id === id ? { ...a, w } : a) };
+      saveBPAttachments(next);
+      return next;
+    });
+  }, [projectId]);
   return (
     <div className="relative h-full w-full">
       {/* Toolbar */}
