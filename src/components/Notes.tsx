@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo, useDeferredValue } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang } from "../i18n";
@@ -13,14 +13,14 @@ interface FormatRange { start: number; end: number; format: "bold" | "italic" | 
 
 const STORAGE_KEY = "an_notes_v2";
 const ATTACH_KEY  = "an_note_attachments_v1";
+const HL_KEY      = "an_highlights_v1";
+const FMT_KEY     = "an_formats_v1";
 
 interface Attachment { id: string; noteId: string; name: string; filePath: string; thumbUrl: string; x: number; y: number; w: number; }
 function loadAttachments(): Record<string, Attachment[]> { try { return JSON.parse(localStorage.getItem(ATTACH_KEY) ?? "{}"); } catch { return {}; } }
 function saveAttachments(a: Record<string, Attachment[]>) { try { localStorage.setItem(ATTACH_KEY, JSON.stringify(a)); } catch {} }
-
 function bytesToDataUrl(bytes: number[], mimeType = "image/jpeg"): string {
-  const arr = new Uint8Array(bytes);
-  let binary = "";
+  const arr = new Uint8Array(bytes); let binary = "";
   arr.forEach(b => binary += String.fromCharCode(b));
   return `data:${mimeType};base64,${btoa(binary)}`;
 }
@@ -33,10 +33,6 @@ function bytesToUrl(bytes: number[], name = ""): string {
   }
   return "";
 }
-
-const HL_KEY  = "an_highlights_v1";
-const FMT_KEY = "an_formats_v1";
-
 function loadNotes(): Note[] { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : []; } catch { return []; } }
 function saveNotes(n: Note[]) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(n)); } catch {} }
 function loadHL(): Record<string, HighlightRange[]> { try { const r = localStorage.getItem(HL_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; } }
@@ -45,9 +41,13 @@ function loadFmt(): Record<string, FormatRange[]> { try { const r = localStorage
 function saveFmt(f: Record<string, FormatRange[]>) { try { localStorage.setItem(FMT_KEY, JSON.stringify(f)); } catch {} }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
-// Stable empty arrays — prevent useMemo from firing when there's no data
+// Stable empty arrays — noteHL/noteFmt memos stay stable when no data
 const EMPTY_HL: HighlightRange[] = [];
 const EMPTY_FMT: FormatRange[] = [];
+
+// Outside component — no re-creation on render
+const WIDTH_PRESETS = [600, 720, 900];
+const WIDTH_LABELS  = ["Compact", "Normal", "Wide"];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,9 +71,6 @@ type HColor = typeof COLORS[number]["id"];
 const hBg   = (id: string) => `var(--hl-${id}-bg)`;
 const hText = (id: string) => `var(--hl-${id}-text)`;
 const hDot  = (id: string) => `var(--hl-${id}-dot)`;
-
-const WIDTH_PRESETS = [600, 720, 900];
-const WIDTH_LABELS  = ["Compact", "Normal", "Wide"];
 
 // ─── renderWithFormats ─────────────────────────────────────────────────────────
 
@@ -110,7 +107,7 @@ function renderWithFormats(text: string, hls: HighlightRange[], fmts: FormatRang
   return nodes;
 }
 
-// ─── Save badge ────────────────────────────────────────────────────────────────
+// ─── SaveBadge ─────────────────────────────────────────────────────────────────
 
 const SaveBadge: React.FC<{ dirty: boolean; saving: boolean }> = ({ dirty, saving }) => {
   const style: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4, fontSize: 10, fontFamily: "monospace", userSelect: "none", whiteSpace: "nowrap", width: 60 };
@@ -145,7 +142,7 @@ const TagRow: React.FC<{ value: string; onChange: (v: string) => void }> = ({ va
   );
 };
 
-// ─── NoteItem — stable callbacks via id, not inline closures ────────────────────
+// ─── NoteItem — memo + stable (id) callbacks prevent re-renders ────────────────
 
 const NoteItem = memo<{ note: Note; active: boolean; onSelect: (id: string) => void; onDelete: (id: string) => void }>(
   ({ note, active, onSelect, onDelete }) => {
@@ -180,14 +177,11 @@ const NoteItem = memo<{ note: Note; active: boolean; onSelect: (id: string) => v
   }
 );
 
-// ─── NotesSidebarPanel — memoized: never re-renders while user is typing ────────
+// ─── NotesSidebarPanel — memo: only re-renders when notes list / search changes ─
 
 const NotesSidebarPanel = memo<{
-  width: number;
-  noteCount: number;
-  search: string;
-  filtered: Note[];
-  selectedId: string | null;
+  width: number; noteCount: number; search: string;
+  filtered: Note[]; selectedId: string | null;
   onSearch: React.Dispatch<React.SetStateAction<string>>;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -207,8 +201,7 @@ const NotesSidebarPanel = memo<{
     <div className="p-3 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
       <div className="flex items-center gap-2 px-3 py-2 rounded-2xl" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
         <Search size={11} style={{ color: "var(--c-text-4)", flexShrink: 0 }} />
-        <input value={search} onChange={e => onSearch(e.target.value)} placeholder={t("search")}
-          className="bg-transparent text-[12px] outline-none w-full text-select" style={{ color: "var(--c-text-2)" }} />
+        <input value={search} onChange={e => onSearch(e.target.value)} placeholder={t("search")} className="bg-transparent text-[12px] outline-none w-full text-select" style={{ color: "var(--c-text-2)" }} />
         {search && <button onClick={() => onSearch("")} style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}><X size={11} /></button>}
       </div>
     </div>
@@ -255,7 +248,6 @@ function fileEmoji(name: string): string {
   if (['pdf'].includes(ext)) return '📄';
   if (['doc','docx'].includes(ext)) return '📝';
   if (['xls','xlsx','csv'].includes(ext)) return '📊';
-  if (['ppt','pptx'].includes(ext)) return '📊';
   if (['zip','rar','7z'].includes(ext)) return '🗜️';
   if (['mp4','mov','avi'].includes(ext)) return '🎬';
   if (['mp3','wav','m4a'].includes(ext)) return '🎵';
@@ -288,103 +280,53 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
   const dragAttach    = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const dragMovedRef  = useRef(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-
   const titleRef   = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
-  // Refs for latest values — allow stable callbacks without stale closures
-  const selectedIdRef = useRef(selectedId);
-  const selRef        = useRef(sel);
-  const notesRef      = useRef(notes);
-  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
-  useEffect(() => { selRef.current = sel; }, [sel]);
-  useEffect(() => { notesRef.current = notes; }, [notes]);
+  const selected = notes.find(n => n.id === selectedId) ?? null;
+  const filtered = search.trim()
+    ? notes.filter(n => { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.toLowerCase().includes(q); })
+    : notes;
 
-  // ── Live content: decoupled from notes state — typing is instant ──
-  // notes state updates are debounced (300ms) so the whole tree doesn't re-render on keystrokes
-  const [liveContent, setLiveContent] = useState<string>(() => loadNotes()[0]?.content ?? "");
-  const liveContentRef = useRef(liveContent);
-  useEffect(() => { liveContentRef.current = liveContent; }, [liveContent]);
-
-  // Sync live content when switching notes
-  useEffect(() => {
-    const content = notesRef.current.find(n => n.id === selectedId)?.content ?? "";
-    setLiveContent(content);
-    liveContentRef.current = content;
-  }, [selectedId]);
-
-  // Derive selected note — depends only on selectedId for the memo key
-  const selected = useMemo(() => notes.find(n => n.id === selectedId) ?? null, [notes, selectedId]);
-
-  // Memoized search filter
-  const filtered = useMemo(() =>
-    search.trim() ? notes.filter(n => { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.toLowerCase().includes(q); }) : notes,
-    [notes, search]
-  );
-
-  // Use selected?.id (not selected) as dep — stable during typing, only changes on note switch
+  // selected?.id dep: stays stable during typing (id doesn't change, only content does)
   const noteHL  = useMemo(() => (selected ? highlights[selected.id] : undefined) ?? EMPTY_HL, [highlights, selected?.id]);
   const noteFmt = useMemo(() => (selected ? formats[selected.id] : undefined) ?? EMPTY_FMT,   [formats,     selected?.id]);
 
-  // Deferred content — React schedules these computations for idle time.
-  // The textarea gets liveContent instantly; heavy work (renderWithFormats, wc regex)
-  // runs only when the browser has spare cycles, eliminating keystroke freezes.
-  const deferredContent = useDeferredValue(liveContent);
-
-  // Only runs renderWithFormats when there IS actual formatting, and only on idle
+  // Only calls renderWithFormats when formatting actually exists
   const renderedContent = useMemo(() => {
     if (!noteHL.length && !noteFmt.length) return null;
-    if (!deferredContent) return null;
-    return renderWithFormats(deferredContent, noteHL, noteFmt);
-  }, [deferredContent, noteHL, noteFmt]);
+    if (!selected?.content) return null;
+    return renderWithFormats(selected.content, noteHL, noteFmt);
+  }, [selected?.content, noteHL, noteFmt]);
 
-  const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected?.id]);
-
-  // Word count — deferred so .split(/\s+/) regex never blocks a keystroke
-  const wc = useMemo(() => selected?.id ? {
-    words: deferredContent.trim() ? deferredContent.trim().split(/\s+/).length : 0,
-    chars: deferredContent.length,
-  } : null, [selected?.id, deferredContent]);
-
+  const noteAttachments = selected ? (attachments[selected.id] ?? []) : [];
+  const wc = selected ? { words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0, chars: selected.content.length } : null;
   const hasSel = sel.start < sel.end;
 
-  // ── Stable save callback ──
   const scheduleSave = useCallback((updated: Note[]) => {
     setDirty(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
   }, []);
 
-  // ── Content updater: liveContent updates instantly, notes state debounced 300ms ──
-  // This prevents re-rendering the entire component tree on every keystroke
-  const updateContent = useCallback((value: string) => {
-    setLiveContent(value);
-    const sid = selectedIdRef.current;
-    if (!sid) return;
-    if (contentSyncTimer.current) clearTimeout(contentSyncTimer.current);
-    contentSyncTimer.current = setTimeout(() => {
-      setNotes(prev => {
-        const updated = prev.map(n => n.id === sid ? { ...n, content: value, updatedAt: Date.now() } : n);
-        scheduleSave(updated);
-        return updated;
-      });
-    }, 300);
-  }, [scheduleSave]);
+  // Auto-resize textarea height (skip when textarea is absolute-positioned = overlay mode)
+  const resize = () => {
+    const el = contentRef.current;
+    if (!el || el.style.position === "absolute") return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  };
+  useEffect(() => { resize(); }, [selected?.content]);
 
-  // ── Stable field updater for title/tags (non-content fields) ──
-  const updateField = useCallback((field: keyof Note, value: string) => {
-    const sid = selectedIdRef.current;
-    if (!sid) return;
-    setNotes(prev => {
-      const updated = prev.map(n => n.id === sid ? { ...n, [field]: value, updatedAt: Date.now() } : n);
-      scheduleSave(updated);
-      return updated;
-    });
-  }, [scheduleSave]);
+  const updateField = (field: keyof Note, value: string) => {
+    if (!selectedId) return;
+    const updated = notes.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n);
+    setNotes(updated); scheduleSave(updated);
+  };
 
-  // ── Stable note creation — no notes in deps ──
   const createNote = useCallback(() => {
     const note: Note = { id: uid(), title: "", content: "", tags: "", createdAt: Date.now(), updatedAt: Date.now() };
     setNotes(prev => { const next = [note, ...prev]; saveNotes(next); return next; });
@@ -392,37 +334,95 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
     setTimeout(() => titleRef.current?.focus(), 40);
   }, []);
 
-  // ── Stable delete — uses functional setState ──
-  const deleteNote = useCallback((id: string) => {
-    setNotes(prev => {
-      const next = prev.filter(n => n.id !== id);
-      saveNotes(next);
-      return next;
-    });
-    setSelId(prev => prev === id ? (notesRef.current.filter(n => n.id !== id)[0]?.id ?? null) : prev);
+  // Stable callbacks for NotesSidebarPanel memo — functional updates, no deps needed
+  const handleSelectNote = useCallback((id: string) => {
+    setSelId(id); setMode("write"); setSel({ start: 0, end: 0 });
   }, []);
 
-  // ── Keyboard shortcuts — attach ONCE, read latest via refs ──
-  const applyFmtRef  = useRef<(fmt: "bold" | "italic" | "bold-italic", s?: number, e?: number) => void>(() => {});
-  const createNoteRef = useRef(createNote);
-  useEffect(() => { createNoteRef.current = createNote; }, [createNote]);
+  const handleDeleteNote = useCallback((id: string) => {
+    setNotes(prev => { const next = prev.filter(n => n.id !== id); saveNotes(next); return next; });
+    setSelId(prev => prev === id ? null : prev);
+  }, []);
 
-  const isActiveRef = useRef(isActive);
-  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
-
+  // Keyboard shortcuts — attached once, isActiveRef guards inactive tab
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (!isActiveRef.current) return; // ignore when Notes tab is hidden
-      if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); createNoteRef.current(); }
-      const s = selRef.current;
-      if ((e.metaKey || e.ctrlKey) && e.key === "b" && s.start < s.end) { e.preventDefault(); applyFmtRef.current("bold"); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "i" && s.start < s.end) { e.preventDefault(); applyFmtRef.current("italic"); }
+      if (!isActiveRef.current) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); createNote(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "b" && sel.start < sel.end) { e.preventDefault(); applyFmt("bold"); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "i" && sel.start < sel.end) { e.preventDefault(); applyFmt("italic"); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, []); // attached once, never re-attached
+  }, [notes, sel]);
 
-  // Close attach menu on outside click
+  const applyHL = useCallback((color: HColor, start: number, end: number) => {
+    if (!selectedId || start >= end) return;
+    const existing = highlights[selectedId] ?? [];
+    const result: HighlightRange[] = [];
+    for (const r of existing) {
+      if (r.end <= start || r.start >= end) { result.push(r); }
+      else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
+    }
+    result.push({ start, end, color });
+    result.sort((a, b) => a.start - b.start);
+    const next = { ...highlights, [selectedId]: result };
+    setHL(next); saveHL(next);
+  }, [selectedId, highlights]);
+
+  const removeHL = useCallback((start: number, end: number) => {
+    if (!selectedId) return;
+    const result: HighlightRange[] = [];
+    for (const r of highlights[selectedId] ?? []) {
+      if (r.end <= start || r.start >= end) { result.push(r); }
+      else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
+    }
+    const next = { ...highlights, [selectedId]: result };
+    setHL(next); saveHL(next);
+  }, [selectedId, highlights]);
+
+  const applyFmt = useCallback((fmt: "bold" | "italic" | "bold-italic", start?: number, end?: number) => {
+    if (!selectedId) return;
+    const s = start ?? sel.start; const e = end ?? sel.end;
+    if (s >= e) return;
+    const existing = formats[selectedId] ?? [];
+    const result: FormatRange[] = [];
+    for (const r of existing) {
+      if (r.end <= s || r.start >= e) { result.push(r); }
+      else { if (r.start < s) result.push({ ...r, end: s }); if (r.end > e) result.push({ ...r, start: e }); }
+    }
+    result.push({ start: s, end: e, format: fmt });
+    result.sort((a, b) => a.start - b.start);
+    const next = { ...formats, [selectedId]: result };
+    setFmt(next); saveFmt(next);
+  }, [selectedId, formats, sel]);
+
+  const removeFmt = useCallback((start: number, end: number) => {
+    if (!selectedId) return;
+    const result: FormatRange[] = [];
+    for (const r of formats[selectedId] ?? []) {
+      if (r.end <= start || r.start >= end) { result.push(r); }
+      else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
+    }
+    const next = { ...formats, [selectedId]: result };
+    setFmt(next); saveFmt(next);
+  }, [selectedId, formats]);
+
+  const handleMouseUp = useCallback(() => {
+    const ta = contentRef.current;
+    if (!ta) return;
+    let start = ta.selectionStart ?? 0;
+    let end   = ta.selectionEnd   ?? 0;
+    if (start < end) {
+      const text = ta.value;
+      const W = /[a-zA-Zа-яА-ЯёЁ0-9]/;
+      while (start > 0 && W.test(text[start - 1] ?? "")) start--;
+      while (end < text.length && W.test(text[end] ?? "")) end++;
+      ta.setSelectionRange(start, end);
+    }
+    setSel({ start, end });
+  }, []);
+
   useEffect(() => {
     if (!attachMenuOpen) return;
     const close = () => setAttachMenuOpen(false);
@@ -430,7 +430,6 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
     return () => document.removeEventListener("click", close);
   }, [attachMenuOpen]);
 
-  // Load thumbs for existing attachments on mount
   useEffect(() => {
     const loadThumbs = async () => {
       const { invoke } = await import("@tauri-apps/api/tauri");
@@ -439,11 +438,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
       for (const noteId of Object.keys(allAttach)) {
         for (const att of allAttach[noteId]) {
           if (!att.thumbUrl && att.filePath) {
-            try {
-              const bytes = await invoke<number[]>("read_attachment", { path: att.filePath });
-              att.thumbUrl = bytesToUrl(bytes, att.name);
-              changed = true;
-            } catch {}
+            try { const bytes = await invoke<number[]>("read_attachment", { path: att.filePath }); att.thumbUrl = bytesToUrl(bytes, att.name); changed = true; } catch {}
           }
         }
       }
@@ -454,111 +449,14 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
 
   useEffect(() => {
     const onVoiceNote = () => {
-      const updated = loadNotes();
-      setNotes(updated);
-      if (updated.length > 0 && !selectedIdRef.current) setSelId(updated[0].id);
+      const updated = loadNotes(); setNotes(updated);
+      if (updated.length > 0 && !selectedId) setSelId(updated[0].id);
     };
     window.addEventListener("an-notes-updated", onVoiceNote);
     return () => window.removeEventListener("an-notes-updated", onVoiceNote);
-  }, []);
+  }, [selectedId]);
 
-  const applyHL = useCallback((color: HColor, start: number, end: number) => {
-    const sid = selectedIdRef.current;
-    if (!sid || start >= end) return;
-    setHL(prev => {
-      const existing = prev[sid] ?? [];
-      const result: HighlightRange[] = [];
-      for (const r of existing) {
-        if (r.end <= start || r.start >= end) { result.push(r); }
-        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
-      }
-      result.push({ start, end, color });
-      result.sort((a, b) => a.start - b.start);
-      const next = { ...prev, [sid]: result };
-      saveHL(next);
-      return next;
-    });
-  }, []);
-
-  const removeHL = useCallback((start: number, end: number) => {
-    const sid = selectedIdRef.current;
-    if (!sid) return;
-    setHL(prev => {
-      const result: HighlightRange[] = [];
-      for (const r of prev[sid] ?? []) {
-        if (r.end <= start || r.start >= end) { result.push(r); }
-        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
-      }
-      const next = { ...prev, [sid]: result };
-      saveHL(next);
-      return next;
-    });
-  }, []);
-
-  const applyFmt = useCallback((fmt: "bold" | "italic" | "bold-italic", start?: number, end?: number) => {
-    const sid = selectedIdRef.current;
-    if (!sid) return;
-    const s = start ?? selRef.current.start;
-    const e = end   ?? selRef.current.end;
-    if (s >= e) return;
-    setFmt(prev => {
-      const existing = prev[sid] ?? [];
-      const result: FormatRange[] = [];
-      for (const r of existing) {
-        if (r.end <= s || r.start >= e) { result.push(r); }
-        else { if (r.start < s) result.push({ ...r, end: s }); if (r.end > e) result.push({ ...r, start: e }); }
-      }
-      result.push({ start: s, end: e, format: fmt });
-      result.sort((a, b) => a.start - b.start);
-      const next = { ...prev, [sid]: result };
-      saveFmt(next);
-      return next;
-    });
-  }, []);
-
-  // Keep ref in sync for keyboard shortcut handler
-  useEffect(() => { applyFmtRef.current = applyFmt; }, [applyFmt]);
-
-  const removeFmt = useCallback((start: number, end: number) => {
-    const sid = selectedIdRef.current;
-    if (!sid) return;
-    setFmt(prev => {
-      const result: FormatRange[] = [];
-      for (const r of prev[sid] ?? []) {
-        if (r.end <= start || r.start >= end) { result.push(r); }
-        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
-      }
-      const next = { ...prev, [sid]: result };
-      saveFmt(next);
-      return next;
-    });
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    const ta = contentRef.current;
-    if (!ta) return;
-    let start = Math.max(0, ta.selectionStart ?? 0);
-    let end   = Math.max(0, ta.selectionEnd   ?? 0);
-    if (start < end) {
-      const text = ta.value;
-      const W = /[\p{L}\p{N}]/u;
-      while (start > 0 && W.test(text[start - 1] ?? "")) start--;
-      while (end < text.length && W.test(text[end] ?? "")) end++;
-      ta.setSelectionRange(start, end);
-    }
-    setSel({ start, end });
-  }, []);
-
-  const openFile = useCallback(async (att: Attachment) => {
-    const imgExts = ["jpg","jpeg","png","gif","webp","svg","bmp","heic","avif"];
-    const ext = att.name.split(".").pop()?.toLowerCase() ?? "";
-    const isImg = imgExts.includes(ext) || (att.thumbUrl?.startsWith("data:image") ?? false);
-    if (isImg && att.thumbUrl) { setLightboxUrl(att.thumbUrl); return; }
-    if (!att.filePath) return;
-    try { await invoke("open_file_native", { path: att.filePath }); } catch {}
-  }, []);
-
-  const addAttachment = useCallback((noteId: string, files: FileList | null) => {
+  const addAttachment = (noteId: string, files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -567,11 +465,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
         reader.onload = async (ev) => {
           const thumbUrl = ev.target?.result as string ?? "";
           let filePath = "";
-          try {
-            const { invoke } = await import("@tauri-apps/api/tauri");
-            const buf = await file.arrayBuffer();
-            filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) });
-          } catch {}
+          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) }); } catch {}
           const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl, x: 20, y: 20, w: 240 };
           setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
         };
@@ -579,76 +473,37 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
       } else {
         (async () => {
           let filePath = "";
-          try {
-            const { invoke } = await import("@tauri-apps/api/tauri");
-            const buf = await file.arrayBuffer();
-            filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) });
-          } catch {}
+          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) }); } catch {}
           const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl: "", x: 20, y: 20, w: 240 };
           setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
         })();
       }
     }
-  }, []);
+  };
 
-  const removeAttachment = useCallback(async (noteId: string, id: string) => {
+  const removeAttachment = async (noteId: string, id: string) => {
     const att = (attachments[noteId]??[]).find(a => a.id === id);
-    if (att?.filePath) {
-      try { const { invoke } = await import("@tauri-apps/api/tauri"); await invoke("delete_attachment", { path: att.filePath }); } catch {}
-    }
+    if (att?.filePath) { try { const { invoke } = await import("@tauri-apps/api/tauri"); await invoke("delete_attachment", { path: att.filePath }); } catch {} }
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).filter(a => a.id !== id) }; saveAttachments(next); return next; });
-  }, [attachments]);
+  };
 
-  const moveAttachment = useCallback((noteId: string, id: string, x: number, y: number) => {
+  const moveAttachment = (noteId: string, id: string, x: number, y: number) => {
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).map(a => a.id === id ? { ...a, x, y } : a) }; saveAttachments(next); return next; });
-  }, []);
+  };
 
-  const resizeAttachment = useCallback((noteId: string, id: string, w: number) => {
+  const resizeAttachment = (noteId: string, id: string, w: number) => {
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).map(a => a.id === id ? { ...a, w } : a) }; saveAttachments(next); return next; });
-  }, []);
-
-  // Stable callbacks for NoteItem — don't change between renders
-  const handleSelectNote = useCallback((id: string) => {
-    // Flush any pending content update before switching notes
-    if (contentSyncTimer.current) {
-      clearTimeout(contentSyncTimer.current);
-      contentSyncTimer.current = null;
-      const sid = selectedIdRef.current;
-      const val = liveContentRef.current;
-      if (sid) {
-        setNotes(prev => {
-          const updated = prev.map(n => n.id === sid ? { ...n, content: val, updatedAt: Date.now() } : n);
-          saveNotes(updated);
-          return updated;
-        });
-      }
-    }
-    setSelId(id); setMode("write"); setSel({ start: 0, end: 0 });
-  }, []);
-
-  const handleDeleteNote = useCallback((id: string) => {
-    deleteNote(id);
-  }, [deleteNote]);
+  };
 
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}>
-
-      {/* Sidebar — memoized, never re-renders during typing */}
       <NotesSidebarPanel
-        width={sidebarW}
-        noteCount={notes.length}
-        search={search}
-        filtered={filtered}
-        selectedId={selectedId}
-        onSearch={setSearch}
-        onSelect={handleSelectNote}
-        onDelete={handleDeleteNote}
-        onCreate={createNote}
+        width={sidebarW} noteCount={notes.length} search={search} filtered={filtered}
+        selectedId={selectedId} onSearch={setSearch}
+        onSelect={handleSelectNote} onDelete={handleDeleteNote} onCreate={createNote}
       />
-
       <ResizeHandle onResize={dx => setSidebarW(w => Math.max(160, Math.min(400, w + dx)))} />
 
-      {/* Editor */}
       <div className="flex-1 flex flex-col h-full overflow-hidden" style={{ background: "var(--c-bg)" }}>
         {!selected ? (
           <div className="flex flex-col items-center justify-center h-full gap-5 select-none">
@@ -723,7 +578,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                   </div>
                 )}
               </div>
-              <button onClick={() => deleteNote(selected.id)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] transition-all select-none flex-shrink-0"
+              <button onClick={() => handleDeleteNote(selected.id)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] transition-all select-none flex-shrink-0"
                 style={{ color: "var(--c-text-3)", border: "1px solid transparent" }}
                 onMouseEnter={e => { e.currentTarget.style.color = "#f43f5e"; e.currentTarget.style.background = "#f43f5e18"; }}
                 onMouseLeave={e => { e.currentTarget.style.color = "var(--c-text-3)"; e.currentTarget.style.background = "transparent"; }}>
@@ -790,7 +645,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
             <div className="flex-1 overflow-y-auto overflow-x-hidden">
               <div className="mx-auto px-8 py-8 pb-24" style={{ maxWidth: editorMaxW }}>
 
-                {/* ── Write mode ── */}
+                {/* Write mode */}
                 {mode === "write" && (
                   <div style={{ position: "relative" }}>
                     <div style={{ position: "relative", borderRadius: 16, transition: "box-shadow 0.2s", boxShadow: editorFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px var(--c-border-sub)" }}>
@@ -799,8 +654,8 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                           <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
                             {renderedContent}
                           </div>
-                          <textarea ref={contentRef} value={liveContent}
-                            onChange={e => updateContent(e.target.value)}
+                          <textarea ref={contentRef} value={selected.content}
+                            onChange={e => { updateField("content", e.target.value); }}
                             onFocus={() => setEF(true)}
                             onBlur={e => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as globalThis.Node)) setEF(false); }}
                             onMouseUp={handleMouseUp}
@@ -809,8 +664,9 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                           />
                         </>
                       ) : (
-                        <textarea ref={contentRef} value={liveContent}
-                          onChange={e => updateContent(e.target.value)}
+                        <textarea ref={contentRef} value={selected.content}
+                          onChange={e => { updateField("content", e.target.value); resize(); }}
+                          onInput={resize}
                           onFocus={() => setEF(true)}
                           onBlur={e => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as globalThis.Node)) setEF(false); }}
                           onMouseUp={handleMouseUp}
@@ -821,18 +677,17 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                       )}
                     </div>
 
+                    {/* Attachments */}
                     {noteAttachments.map(att => {
                       const isImage = att.thumbUrl && (att.thumbUrl.startsWith("data:image") || att.thumbUrl.startsWith("blob:"));
                       return (
-                        <div key={att.id}
-                          style={{ position: "absolute", left: att.x, top: att.y, width: att.w, zIndex: 10, userSelect: "none" }}
+                        <div key={att.id} style={{ position: "absolute", left: att.x, top: att.y, width: att.w, zIndex: 10, userSelect: "none" }}
                           draggable={false} onDragStart={e => e.preventDefault()}
                           onMouseDown={e => {
                             if ((e.target as HTMLElement).dataset.resize) return;
                             e.preventDefault(); e.stopPropagation();
                             const el = e.currentTarget as HTMLElement;
-                            const startX = e.clientX, startY = e.clientY;
-                            const origX = att.x, origY = att.y;
+                            const startX = e.clientX, startY = e.clientY, origX = att.x, origY = att.y;
                             let moved = false, lastX = origX, lastY = origY;
                             dragMovedRef.current = false;
                             dragAttach.current = { id: att.id, startX, startY, origX, origY };
@@ -854,19 +709,18 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                             };
                             window.addEventListener("mousemove", onMove);
                             window.addEventListener("mouseup", onUp);
-                          }}
-                        >
+                          }}>
                           <div className="group relative" style={{ width: "100%", borderRadius: 12, overflow: "visible", boxShadow: "0 4px 20px rgba(0,0,0,0.2)", border: "1px solid var(--c-border)", cursor: "grab", background: "var(--c-surface)" }}>
                             {isImage ? (
                               <div style={{ borderRadius: 12, overflow: "hidden", cursor: "zoom-in" }}
                                 onClick={e => e.stopPropagation()}
-                                onDoubleClick={e => { e.stopPropagation(); openFile(att); }}>
+                                onDoubleClick={async e => { e.stopPropagation(); if (att.thumbUrl) setLightboxUrl(att.thumbUrl); }}>
                                 <img src={att.thumbUrl} alt={att.name} style={{ width: "100%", display: "block", borderRadius: 12 }} />
                               </div>
                             ) : (
                               <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ minWidth: 160, cursor: "pointer" }}
                                 onClick={e => e.stopPropagation()}
-                                onDoubleClick={e => { e.stopPropagation(); openFile(att); }}>
+                                onDoubleClick={async e => { e.stopPropagation(); if (!att.filePath) return; try { await invoke("open_file_native", { path: att.filePath }); } catch {} }}>
                                 <span style={{ fontSize: 24 }}>{fileEmoji(att.name)}</span>
                                 <div className="min-w-0">
                                   <p className="text-[11px] font-500 truncate" style={{ color: "var(--c-text-1)", maxWidth: att.w - 60 }}>{att.name}</p>
@@ -887,14 +741,12 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                                   e.preventDefault(); e.stopPropagation();
                                   const card = e.currentTarget.closest(".group") as HTMLElement;
                                   if (!card) return;
-                                  const startX = e.clientX, startW = att.w;
-                                  let lastW = startW;
+                                  const startX = e.clientX, startW = att.w; let lastW = startW;
                                   const onMove = (ev: MouseEvent) => { lastW = Math.max(80, Math.min(800, startW + ev.clientX - startX)); card.style.width = `${lastW}px`; };
                                   const onUp = () => { card.style.width = ""; resizeAttachment(selected.id, att.id, lastW); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
                                   window.addEventListener("mousemove", onMove);
                                   window.addEventListener("mouseup", onUp, { once: true });
-                                }}
-                              />
+                                }} />
                             )}
                           </div>
                         </div>
@@ -905,30 +757,23 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
 
                 {/* Lightbox */}
                 {lightboxUrl && (
-                  <div className="fixed inset-0 z-[200] flex items-center justify-center"
-                    style={{ background: "rgba(0,0,0,0.88)" }} onClick={() => setLightboxUrl(null)}>
-                    <button onClick={() => setLightboxUrl(null)}
-                      className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-2xl"
-                      style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "none", cursor: "pointer" }}>
+                  <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.88)" }} onClick={() => setLightboxUrl(null)}>
+                    <button onClick={() => setLightboxUrl(null)} className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-2xl" style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "none", cursor: "pointer" }}>
                       <X size={20} />
                     </button>
-                    <img src={lightboxUrl} onClick={e => e.stopPropagation()}
-                      style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }} />
+                    <img src={lightboxUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }} />
                   </div>
                 )}
 
-                {/* ── Marker mode ── */}
+                {/* Marker mode */}
                 {mode === "read" && (
                   <div style={{ position: "relative", borderRadius: 16, boxShadow: "0 0 0 1px var(--c-border-sub)" }}>
                     <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
                       {renderedContent
-                        ?? (liveContent
-                          ? <span style={{ whiteSpace: "pre-wrap" }}>{liveContent}</span>
-                          : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
-                        )
+                        ?? (selected.content ? <span style={{ whiteSpace: "pre-wrap" }}>{selected.content}</span> : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>)
                       }
                     </div>
-                    <textarea ref={contentRef} value={liveContent} readOnly
+                    <textarea ref={contentRef} value={selected.content} readOnly
                       onMouseUp={handleMouseUp} onClick={handleMouseUp}
                       className="marker-select"
                       style={{ position: "absolute", inset: 0, cursor: "text", resize: "none", border: "none", outline: "none", padding: "16px 20px", fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", background: "transparent", WebkitTextFillColor: "transparent", caretColor: "transparent" }}
