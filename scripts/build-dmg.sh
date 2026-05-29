@@ -25,7 +25,6 @@ find src-tauri/target -name "rw.*.dmg" -delete 2>/dev/null || true
 rm -f "$DMG_OUT"
 
 echo "==> Building .app bundle..."
-# --bundles app — собирает только .app, без Tauri DMG bundler (не трогает tauri.conf.json, кэш не сбрасывается)
 npm run tauri:build -- --target "$TARGET" --bundles app
 
 if [ ! -d "$APP_PATH" ]; then
@@ -34,6 +33,11 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 mkdir -p "src-tauri/target/${TARGET}/release/bundle/dmg"
+
+# create-dmg берёт папку-источник — кладём .app во временную папку
+STAGING=$(mktemp -d)
+trap "rm -rf '$STAGING'" EXIT
+cp -r "$APP_PATH" "$STAGING/"
 
 echo "==> Creating DMG..."
 CREATE_DMG_ARGS=(
@@ -52,7 +56,7 @@ if [ -f "$BACKGROUND" ]; then
   CREATE_DMG_ARGS+=(--background "$BACKGROUND")
 fi
 
-/opt/homebrew/bin/create-dmg "${CREATE_DMG_ARGS[@]}" "$DMG_OUT" "$APP_PATH"
+/opt/homebrew/bin/create-dmg "${CREATE_DMG_ARGS[@]}" "$DMG_OUT" "$STAGING"
 
 echo ""
 echo "==> Done!"
