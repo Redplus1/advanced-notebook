@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang } from "../i18n";
@@ -45,6 +45,10 @@ function loadFmt(): Record<string, FormatRange[]> { try { const r = localStorage
 function saveFmt(f: Record<string, FormatRange[]>) { try { localStorage.setItem(FMT_KEY, JSON.stringify(f)); } catch {} }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
+// Stable empty arrays — prevent useMemo from firing when there's no data
+const EMPTY_HL: HighlightRange[] = [];
+const EMPTY_FMT: FormatRange[] = [];
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function relDate(ts: number): string {
@@ -68,7 +72,6 @@ const hBg   = (id: string) => `var(--hl-${id}-bg)`;
 const hText = (id: string) => `var(--hl-${id}-text)`;
 const hDot  = (id: string) => `var(--hl-${id}-dot)`;
 
-// Outside component — no need to recreate on every render
 const WIDTH_PRESETS = [600, 720, 900];
 const WIDTH_LABELS  = ["Compact", "Normal", "Wide"];
 
@@ -142,38 +145,40 @@ const TagRow: React.FC<{ value: string; onChange: (v: string) => void }> = ({ va
   );
 };
 
-// ─── NoteItem ──────────────────────────────────────────────────────────────────
+// ─── NoteItem — memoized so it only re-renders when its own note changes ────────
 
-const NoteItem: React.FC<{ note: Note; active: boolean; onSelect: () => void; onDelete: () => void }> = ({ note, active, onSelect, onDelete }) => {
-  const preview = note.content.replace(/\s+/g, " ").trim().slice(0, 75);
-  const tags = note.tags ? note.tags.split(",").filter(s => s.trim()).slice(0, 2) : [];
-  return (
-    <div onClick={onSelect} className="group relative flex flex-col gap-1 px-4 py-3 cursor-pointer border-b transition-all duration-100"
-      style={{ borderColor: "var(--c-border-sub)", background: active ? "var(--c-elevated)" : "transparent" }}
-      onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--c-elevated)88"; }}
-      onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}>
-      {active && <div className="absolute left-0 top-3 bottom-3 w-0.5 rounded-r-full" style={{ background: "var(--c-accent)" }} />}
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[12.5px] font-500 leading-snug truncate" style={{ color: active ? "var(--c-text-1)" : "var(--c-text-2)" }}>
-          {note.title || <span className="italic font-400" style={{ color: "var(--c-text-4)" }}>{t("untitled")}</span>}
-        </p>
-        <button onClick={e => { e.stopPropagation(); onDelete(); }} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all mt-0.5"
-          style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}
-          onMouseEnter={e => e.currentTarget.style.color = "#f43f5e"}
-          onMouseLeave={e => e.currentTarget.style.color = "var(--c-text-4)"}>
-          <Trash2 size={11} />
-        </button>
-      </div>
-      {preview && <p className="text-[11px] leading-relaxed" style={{ color: "var(--c-text-3)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{preview}</p>}
-      <div className="flex items-center justify-between gap-2 mt-0.5">
-        <div className="flex items-center gap-1">
-          {tags.map(tag => <span key={tag} className="text-[9.5px] font-mono px-1.5 py-px rounded-full" style={{ color: "var(--c-accent)", background: "var(--c-accent)14", border: "1px solid var(--c-accent)25" }}>#{tag.trim()}</span>)}
+const NoteItem = memo<{ note: Note; active: boolean; onSelect: () => void; onDelete: () => void }>(
+  ({ note, active, onSelect, onDelete }) => {
+    const preview = note.content.replace(/\s+/g, " ").trim().slice(0, 75);
+    const tags = note.tags ? note.tags.split(",").filter(s => s.trim()).slice(0, 2) : [];
+    return (
+      <div onClick={onSelect} className="group relative flex flex-col gap-1 px-4 py-3 cursor-pointer border-b transition-all duration-100"
+        style={{ borderColor: "var(--c-border-sub)", background: active ? "var(--c-elevated)" : "transparent" }}
+        onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--c-elevated)88"; }}
+        onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}>
+        {active && <div className="absolute left-0 top-3 bottom-3 w-0.5 rounded-r-full" style={{ background: "var(--c-accent)" }} />}
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[12.5px] font-500 leading-snug truncate" style={{ color: active ? "var(--c-text-1)" : "var(--c-text-2)" }}>
+            {note.title || <span className="italic font-400" style={{ color: "var(--c-text-4)" }}>{t("untitled")}</span>}
+          </p>
+          <button onClick={e => { e.stopPropagation(); onDelete(); }} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all mt-0.5"
+            style={{ color: "var(--c-text-4)", background: "none", border: "none", cursor: "pointer" }}
+            onMouseEnter={e => e.currentTarget.style.color = "#f43f5e"}
+            onMouseLeave={e => e.currentTarget.style.color = "var(--c-text-4)"}>
+            <Trash2 size={11} />
+          </button>
         </div>
-        <span className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>{relDate(note.updatedAt)}</span>
+        {preview && <p className="text-[11px] leading-relaxed" style={{ color: "var(--c-text-3)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{preview}</p>}
+        <div className="flex items-center justify-between gap-2 mt-0.5">
+          <div className="flex items-center gap-1">
+            {tags.map(tag => <span key={tag} className="text-[9.5px] font-mono px-1.5 py-px rounded-full" style={{ color: "var(--c-accent)", background: "var(--c-accent)14", border: "1px solid var(--c-accent)25" }}>#{tag.trim()}</span>)}
+          </div>
+          <span className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>{relDate(note.updatedAt)}</span>
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  }
+);
 
 // ─── ResizeHandle ──────────────────────────────────────────────────────────────
 
@@ -194,8 +199,6 @@ const ResizeHandle: React.FC<{ onResize: (dx: number) => void }> = ({ onResize }
     </div>
   );
 };
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function fileEmoji(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
@@ -233,63 +236,102 @@ export const Notes: React.FC = () => {
   const attachInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef   = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const dragAttach = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
-  const dragMovedRef = useRef(false);
+  const dragAttach    = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const dragMovedRef  = useRef(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const titleRef   = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Refs for latest values — allow stable callbacks without stale closures
+  const selectedIdRef = useRef(selectedId);
+  const selRef        = useRef(sel);
+  const notesRef      = useRef(notes);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+  useEffect(() => { selRef.current = sel; }, [sel]);
+  useEffect(() => { notesRef.current = notes; }, [notes]);
+
+  // Derive selected note — depends only on selectedId for the memo key
   const selected = useMemo(() => notes.find(n => n.id === selectedId) ?? null, [notes, selectedId]);
 
-  // Memoized search filter — not recomputed on every keystroke
+  // Memoized search filter
   const filtered = useMemo(() =>
     search.trim() ? notes.filter(n => { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.toLowerCase().includes(q); }) : notes,
     [notes, search]
   );
 
-  const noteHL  = useMemo(() => selected ? highlights[selected.id] ?? [] : [], [highlights, selected]);
-  const noteFmt = useMemo(() => selected ? formats[selected.id] ?? [] : [], [formats, selected]);
+  // Use selected?.id (not selected) as dep — stable during typing, only changes on note switch
+  const noteHL  = useMemo(() => (selected ? highlights[selected.id] : undefined) ?? EMPTY_HL, [highlights, selected?.id]);
+  const noteFmt = useMemo(() => (selected ? formats[selected.id] : undefined) ?? EMPTY_FMT,   [formats,     selected?.id]);
 
-  // Memoized rendered content — not recomputed unless content/highlights/formats change
-  const renderedContent = useMemo(() =>
-    selected?.content ? renderWithFormats(selected.content, noteHL, noteFmt) : null,
-    [selected?.content, noteHL, noteFmt]
-  );
+  // Only runs renderWithFormats when there IS actual formatting — O(1) otherwise
+  const renderedContent = useMemo(() => {
+    if (!noteHL.length && !noteFmt.length) return null;
+    if (!selected?.content) return null;
+    return renderWithFormats(selected.content, noteHL, noteFmt);
+  }, [selected?.content, noteHL, noteFmt]);
 
-  const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected]);
+  const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected?.id]);
 
-  // Memoized word count
   const wc = useMemo(() => selected ? {
     words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0,
-    chars: selected.content.length
+    chars: selected.content.length,
   } : null, [selected?.content]);
 
   const hasSel = sel.start < sel.end;
 
+  // ── Stable save callback ──
   const scheduleSave = useCallback((updated: Note[]) => {
     setDirty(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
   }, []);
 
+  // ── Stable field updater — uses functional setState, no notes/selectedId in deps ──
   const updateField = useCallback((field: keyof Note, value: string) => {
-    if (!selectedId) return;
-    const updated = notes.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n);
-    setNotes(updated); scheduleSave(updated);
-  }, [selectedId, notes, scheduleSave]);
+    const sid = selectedIdRef.current;
+    if (!sid) return;
+    setNotes(prev => {
+      const updated = prev.map(n => n.id === sid ? { ...n, [field]: value, updatedAt: Date.now() } : n);
+      scheduleSave(updated);
+      return updated;
+    });
+  }, [scheduleSave]);
 
+  // ── Stable note creation — no notes in deps ──
   const createNote = useCallback(() => {
     const note: Note = { id: uid(), title: "", content: "", tags: "", createdAt: Date.now(), updatedAt: Date.now() };
-    const next = [note, ...notes]; setNotes(next); setSelId(note.id); saveNotes(next); setDirty(false); setMode("write");
+    setNotes(prev => { const next = [note, ...prev]; saveNotes(next); return next; });
+    setSelId(note.id); setDirty(false); setMode("write");
     setTimeout(() => titleRef.current?.focus(), 40);
-  }, [notes]);
+  }, []);
 
+  // ── Stable delete — uses functional setState ──
   const deleteNote = useCallback((id: string) => {
-    const next = notes.filter(n => n.id !== id); setNotes(next); saveNotes(next);
-    if (selectedId === id) setSelId(next[0]?.id ?? null);
-  }, [notes, selectedId]);
+    setNotes(prev => {
+      const next = prev.filter(n => n.id !== id);
+      saveNotes(next);
+      return next;
+    });
+    setSelId(prev => prev === id ? (notesRef.current.filter(n => n.id !== id)[0]?.id ?? null) : prev);
+  }, []);
+
+  // ── Keyboard shortcuts — attach ONCE, read latest via refs ──
+  const applyFmtRef  = useRef<(fmt: "bold" | "italic" | "bold-italic", s?: number, e?: number) => void>(() => {});
+  const createNoteRef = useRef(createNote);
+  useEffect(() => { createNoteRef.current = createNote; }, [createNote]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); createNoteRef.current(); }
+      const s = selRef.current;
+      if ((e.metaKey || e.ctrlKey) && e.key === "b" && s.start < s.end) { e.preventDefault(); applyFmtRef.current("bold"); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "i" && s.start < s.end) { e.preventDefault(); applyFmtRef.current("italic"); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []); // attached once, never re-attached
 
   // Close attach menu on outside click
   useEffect(() => {
@@ -321,102 +363,88 @@ export const Notes: React.FC = () => {
     loadThumbs();
   }, []);
 
-  // Listen for notes created by voice assistant
   useEffect(() => {
     const onVoiceNote = () => {
       const updated = loadNotes();
       setNotes(updated);
-      if (updated.length > 0 && !selectedId) setSelId(updated[0].id);
+      if (updated.length > 0 && !selectedIdRef.current) setSelId(updated[0].id);
     };
     window.addEventListener("an-notes-updated", onVoiceNote);
     return () => window.removeEventListener("an-notes-updated", onVoiceNote);
-  }, [selectedId]);
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); createNote(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "b" && sel.start < sel.end) { e.preventDefault(); applyFmt("bold"); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "i" && sel.start < sel.end) { e.preventDefault(); applyFmt("italic"); }
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [createNote, sel]);
+  }, []);
 
   const applyHL = useCallback((color: HColor, start: number, end: number) => {
-    if (!selectedId || start >= end) return;
-    const existing = highlights[selectedId] ?? [];
-    // Split any range that partially overlaps with new selection
-    const result: HighlightRange[] = [];
-    for (const r of existing) {
-      if (r.end <= start || r.start >= end) {
-        result.push(r); // no overlap
-      } else {
-        if (r.start < start) result.push({ ...r, end: start });
-        if (r.end > end) result.push({ ...r, start: end });
+    const sid = selectedIdRef.current;
+    if (!sid || start >= end) return;
+    setHL(prev => {
+      const existing = prev[sid] ?? [];
+      const result: HighlightRange[] = [];
+      for (const r of existing) {
+        if (r.end <= start || r.start >= end) { result.push(r); }
+        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
       }
-    }
-    result.push({ start, end, color });
-    result.sort((a, b) => a.start - b.start);
-    const next = { ...highlights, [selectedId]: result };
-    setHL(next); saveHL(next);
-  }, [selectedId, highlights]);
+      result.push({ start, end, color });
+      result.sort((a, b) => a.start - b.start);
+      const next = { ...prev, [sid]: result };
+      saveHL(next);
+      return next;
+    });
+  }, []);
 
   const removeHL = useCallback((start: number, end: number) => {
-    if (!selectedId) return;
-    const existing = highlights[selectedId] ?? [];
-    // Split partially overlapping ranges instead of removing entirely
-    const result: HighlightRange[] = [];
-    for (const r of existing) {
-      if (r.end <= start || r.start >= end) {
-        result.push(r);
-      } else {
-        if (r.start < start) result.push({ ...r, end: start });
-        if (r.end > end) result.push({ ...r, start: end });
+    const sid = selectedIdRef.current;
+    if (!sid) return;
+    setHL(prev => {
+      const result: HighlightRange[] = [];
+      for (const r of prev[sid] ?? []) {
+        if (r.end <= start || r.start >= end) { result.push(r); }
+        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
       }
-    }
-    const next = { ...highlights, [selectedId]: result };
-    setHL(next); saveHL(next);
-  }, [selectedId, highlights]);
+      const next = { ...prev, [sid]: result };
+      saveHL(next);
+      return next;
+    });
+  }, []);
 
   const applyFmt = useCallback((fmt: "bold" | "italic" | "bold-italic", start?: number, end?: number) => {
-    if (!selectedId) return;
-    const s = start ?? sel.start; const e = end ?? sel.end;
+    const sid = selectedIdRef.current;
+    if (!sid) return;
+    const s = start ?? selRef.current.start;
+    const e = end   ?? selRef.current.end;
     if (s >= e) return;
-    const existing = formats[selectedId] ?? [];
-    // Split any range that partially overlaps with new selection
-    const result: FormatRange[] = [];
-    for (const r of existing) {
-      if (r.end <= s || r.start >= e) {
-        result.push(r);
-      } else {
-        if (r.start < s) result.push({ ...r, end: s });
-        if (r.end > e) result.push({ ...r, start: e });
+    setFmt(prev => {
+      const existing = prev[sid] ?? [];
+      const result: FormatRange[] = [];
+      for (const r of existing) {
+        if (r.end <= s || r.start >= e) { result.push(r); }
+        else { if (r.start < s) result.push({ ...r, end: s }); if (r.end > e) result.push({ ...r, start: e }); }
       }
-    }
-    result.push({ start: s, end: e, format: fmt });
-    result.sort((a, b) => a.start - b.start);
-    const next = { ...formats, [selectedId]: result };
-    setFmt(next); saveFmt(next);
-  }, [selectedId, formats, sel]);
+      result.push({ start: s, end: e, format: fmt });
+      result.sort((a, b) => a.start - b.start);
+      const next = { ...prev, [sid]: result };
+      saveFmt(next);
+      return next;
+    });
+  }, []);
+
+  // Keep ref in sync for keyboard shortcut handler
+  useEffect(() => { applyFmtRef.current = applyFmt; }, [applyFmt]);
 
   const removeFmt = useCallback((start: number, end: number) => {
-    if (!selectedId) return;
-    const existing = formats[selectedId] ?? [];
-    // Split partially overlapping ranges instead of removing entirely
-    const result: FormatRange[] = [];
-    for (const r of existing) {
-      if (r.end <= start || r.start >= end) {
-        result.push(r);
-      } else {
-        if (r.start < start) result.push({ ...r, end: start });
-        if (r.end > end) result.push({ ...r, start: end });
+    const sid = selectedIdRef.current;
+    if (!sid) return;
+    setFmt(prev => {
+      const result: FormatRange[] = [];
+      for (const r of prev[sid] ?? []) {
+        if (r.end <= start || r.start >= end) { result.push(r); }
+        else { if (r.start < start) result.push({ ...r, end: start }); if (r.end > end) result.push({ ...r, start: end }); }
       }
-    }
-    const next = { ...formats, [selectedId]: result };
-    setFmt(next); saveFmt(next);
-  }, [selectedId, formats]);
+      const next = { ...prev, [sid]: result };
+      saveFmt(next);
+      return next;
+    });
+  }, []);
 
-  // ── Selection: snap to full words ──
   const handleMouseUp = useCallback(() => {
     const ta = contentRef.current;
     if (!ta) return;
@@ -490,6 +518,15 @@ export const Notes: React.FC = () => {
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).map(a => a.id === id ? { ...a, w } : a) }; saveAttachments(next); return next; });
   }, []);
 
+  // Stable callbacks for NoteItem — don't change between renders
+  const handleSelectNote = useCallback((id: string) => {
+    setSelId(id); setMode("write"); setSel({ start: 0, end: 0 });
+  }, []);
+
+  const handleDeleteNote = useCallback((id: string) => {
+    deleteNote(id);
+  }, [deleteNote]);
+
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}>
 
@@ -519,8 +556,8 @@ export const Notes: React.FC = () => {
             </div>
           ) : filtered.map(note => (
             <NoteItem key={note.id} note={note} active={selectedId === note.id}
-              onSelect={() => { setSelId(note.id); setMode("write"); setSel({ start: 0, end: 0 }); }}
-              onDelete={() => deleteNote(note.id)} />
+              onSelect={() => handleSelectNote(note.id)}
+              onDelete={() => handleDeleteNote(note.id)} />
           ))}
         </div>
         <div className="px-4 py-2.5 border-t" style={{ borderColor: "var(--c-border-sub)" }}>
@@ -557,7 +594,6 @@ export const Notes: React.FC = () => {
                   placeholder={t("note_placeholder")}
                   className="w-full bg-transparent text-[15px] font-600 outline-none text-select" style={{ color: "var(--c-text-1)" }} />
               </div>
-              {/* Mode toggle */}
               <div className="flex items-center gap-0.5 rounded-xl p-1 flex-shrink-0" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
                 {(["write", "read"] as const).map(m => (
                   <button key={m} onClick={() => { setMode(m); setSel({ start: 0, end: 0 }); setTimeout(() => contentRef.current?.focus(), 20); }}
@@ -567,7 +603,6 @@ export const Notes: React.FC = () => {
                   </button>
                 ))}
               </div>
-              {/* Width presets */}
               <div className="hidden md:flex items-center gap-0.5 rounded-xl p-1 flex-shrink-0" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
                 {WIDTH_PRESETS.map((w, i) => (
                   <button key={i} onClick={() => setEditorW(w)} className="px-2 py-1.5 rounded-lg text-[10px] font-mono transition-all"
@@ -678,11 +713,10 @@ export const Notes: React.FC = () => {
                 {mode === "write" && (
                   <div style={{ position: "relative" }}>
                     <div style={{ position: "relative", borderRadius: 16, transition: "box-shadow 0.2s", boxShadow: editorFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px var(--c-border-sub)" }}>
-                      {noteHL.length > 0 || noteFmt.length > 0 ? (
+                      {renderedContent ? (
                         <>
-                          {/* Formatting overlay — only rendered when highlights/formats exist */}
                           <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
-                            {renderedContent ?? <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>}
+                            {renderedContent}
                           </div>
                           <textarea ref={contentRef} value={selected.content}
                             onChange={e => updateField("content", e.target.value)}
@@ -706,23 +740,19 @@ export const Notes: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Draggable attachments */}
                     {noteAttachments.map(att => {
                       const isImage = att.thumbUrl && (att.thumbUrl.startsWith("data:image") || att.thumbUrl.startsWith("blob:"));
                       return (
                         <div key={att.id}
                           style={{ position: "absolute", left: att.x, top: att.y, width: att.w, zIndex: 10, userSelect: "none" }}
-                          draggable={false}
-                          onDragStart={e => e.preventDefault()}
+                          draggable={false} onDragStart={e => e.preventDefault()}
                           onMouseDown={e => {
                             if ((e.target as HTMLElement).dataset.resize) return;
-                            e.preventDefault();
-                            e.stopPropagation();
+                            e.preventDefault(); e.stopPropagation();
                             const el = e.currentTarget as HTMLElement;
                             const startX = e.clientX, startY = e.clientY;
                             const origX = att.x, origY = att.y;
-                            let moved = false;
-                            let lastX = origX, lastY = origY;
+                            let moved = false, lastX = origX, lastY = origY;
                             dragMovedRef.current = false;
                             dragAttach.current = { id: att.id, startX, startY, origX, origY };
                             document.body.style.cursor = "grabbing";
@@ -731,14 +761,12 @@ export const Notes: React.FC = () => {
                               const dx = ev.clientX - startX, dy = ev.clientY - startY;
                               if (Math.abs(dx) > 5 || Math.abs(dy) > 5) { moved = true; dragMovedRef.current = true; }
                               if (!moved) return;
-                              lastX = Math.max(0, origX + dx);
-                              lastY = Math.max(0, origY + dy);
+                              lastX = Math.max(0, origX + dx); lastY = Math.max(0, origY + dy);
                               el.style.transform = `translate(${dx}px, ${dy}px)`;
                             };
                             const onUp = () => {
                               if (moved) { el.style.transform = ""; moveAttachment(selected.id, att.id, lastX, lastY); }
-                              dragAttach.current = null;
-                              dragMovedRef.current = false;
+                              dragAttach.current = null; dragMovedRef.current = false;
                               document.body.style.cursor = "";
                               window.removeEventListener("mousemove", onMove);
                               window.removeEventListener("mouseup", onUp);
@@ -780,16 +808,8 @@ export const Notes: React.FC = () => {
                                   if (!card) return;
                                   const startX = e.clientX, startW = att.w;
                                   let lastW = startW;
-                                  const onMove = (ev: MouseEvent) => {
-                                    lastW = Math.max(80, Math.min(800, startW + ev.clientX - startX));
-                                    card.style.width = `${lastW}px`;
-                                  };
-                                  const onUp = () => {
-                                    card.style.width = "";
-                                    resizeAttachment(selected.id, att.id, lastW);
-                                    window.removeEventListener("mousemove", onMove);
-                                    window.removeEventListener("mouseup", onUp);
-                                  };
+                                  const onMove = (ev: MouseEvent) => { lastW = Math.max(80, Math.min(800, startW + ev.clientX - startX)); card.style.width = `${lastW}px`; };
+                                  const onUp = () => { card.style.width = ""; resizeAttachment(selected.id, att.id, lastW); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
                                   window.addEventListener("mousemove", onMove);
                                   window.addEventListener("mouseup", onUp, { once: true });
                                 }}
@@ -805,8 +825,7 @@ export const Notes: React.FC = () => {
                 {/* Lightbox */}
                 {lightboxUrl && (
                   <div className="fixed inset-0 z-[200] flex items-center justify-center"
-                    style={{ background: "rgba(0,0,0,0.88)" }}
-                    onClick={() => setLightboxUrl(null)}>
+                    style={{ background: "rgba(0,0,0,0.88)" }} onClick={() => setLightboxUrl(null)}>
                     <button onClick={() => setLightboxUrl(null)}
                       className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-2xl"
                       style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "none", cursor: "pointer" }}>
@@ -821,7 +840,12 @@ export const Notes: React.FC = () => {
                 {mode === "read" && (
                   <div style={{ position: "relative", borderRadius: 16, boxShadow: "0 0 0 1px var(--c-border-sub)" }}>
                     <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
-                      {renderedContent ?? <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>}
+                      {renderedContent
+                        ?? (selected.content
+                          ? <span style={{ whiteSpace: "pre-wrap" }}>{selected.content}</span>
+                          : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
+                        )
+                      }
                     </div>
                     <textarea ref={contentRef} value={selected.content} readOnly
                       onMouseUp={handleMouseUp} onClick={handleMouseUp}
