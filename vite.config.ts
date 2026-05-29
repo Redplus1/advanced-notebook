@@ -20,14 +20,23 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-  // Tell Vite not to try to transform files in /public
   assetsInclude: ["**/*.wasm", "**/*.bin"],
-  optimizeDeps: {
-    exclude: ["vosk-browser"],
-  },
   build: {
+    target: "esnext",
+    minify: "esbuild",
     rollupOptions: {
-      external: [],
+      output: {
+        // Split vendor chunks for better caching
+        manualChunks: {
+          "react-vendor": ["react", "react-dom"],
+          "reactflow-vendor": ["reactflow"],
+          "lucide-vendor": ["lucide-react"],
+        },
+      },
     },
+  },
+  esbuild: {
+    // Remove console.log and debugger in production
+    drop: ["console", "debugger"],
   },
 }));

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo, useDeferredValue } from "react";
 import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang } from "../i18n";
@@ -328,21 +328,25 @@ export const Notes: React.FC = () => {
   const noteHL  = useMemo(() => (selected ? highlights[selected.id] : undefined) ?? EMPTY_HL, [highlights, selected?.id]);
   const noteFmt = useMemo(() => (selected ? formats[selected.id] : undefined) ?? EMPTY_FMT,   [formats,     selected?.id]);
 
-  // Only runs renderWithFormats when there IS actual formatting — O(1) otherwise
-  // Uses liveContent so overlay stays in sync with typing without updating notes state
+  // Deferred content — React schedules these computations for idle time.
+  // The textarea gets liveContent instantly; heavy work (renderWithFormats, wc regex)
+  // runs only when the browser has spare cycles, eliminating keystroke freezes.
+  const deferredContent = useDeferredValue(liveContent);
+
+  // Only runs renderWithFormats when there IS actual formatting, and only on idle
   const renderedContent = useMemo(() => {
     if (!noteHL.length && !noteFmt.length) return null;
-    if (!liveContent) return null;
-    return renderWithFormats(liveContent, noteHL, noteFmt);
-  }, [liveContent, noteHL, noteFmt]);
+    if (!deferredContent) return null;
+    return renderWithFormats(deferredContent, noteHL, noteFmt);
+  }, [deferredContent, noteHL, noteFmt]);
 
   const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected?.id]);
 
-  // Word count based on liveContent — always current without touching notes state
-  const wc = useMemo(() => selected ? {
-    words: liveContent.trim() ? liveContent.trim().split(/\s+/).length : 0,
-    chars: liveContent.length,
-  } : null, [selected?.id, liveContent]);
+  // Word count — deferred so .split(/\s+/) regex never blocks a keystroke
+  const wc = useMemo(() => selected?.id ? {
+    words: deferredContent.trim() ? deferredContent.trim().split(/\s+/).length : 0,
+    chars: deferredContent.length,
+  } : null, [selected?.id, deferredContent]);
 
   const hasSel = sel.start < sel.end;
 
