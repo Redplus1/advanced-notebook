@@ -243,6 +243,7 @@ export const Notes: React.FC = () => {
   const titleRef   = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs for latest values — allow stable callbacks without stale closures
   const selectedIdRef = useRef(selectedId);
@@ -251,6 +252,19 @@ export const Notes: React.FC = () => {
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { selRef.current = sel; }, [sel]);
   useEffect(() => { notesRef.current = notes; }, [notes]);
+
+  // ── Live content: decoupled from notes state — typing is instant ──
+  // notes state updates are debounced (300ms) so the whole tree doesn't re-render on keystrokes
+  const [liveContent, setLiveContent] = useState<string>(() => loadNotes()[0]?.content ?? "");
+  const liveContentRef = useRef(liveContent);
+  useEffect(() => { liveContentRef.current = liveContent; }, [liveContent]);
+
+  // Sync live content when switching notes
+  useEffect(() => {
+    const content = notesRef.current.find(n => n.id === selectedId)?.content ?? "";
+    setLiveContent(content);
+    liveContentRef.current = content;
+  }, [selectedId]);
 
   // Derive selected note — depends only on selectedId for the memo key
   const selected = useMemo(() => notes.find(n => n.id === selectedId) ?? null, [notes, selectedId]);
@@ -266,18 +280,20 @@ export const Notes: React.FC = () => {
   const noteFmt = useMemo(() => (selected ? formats[selected.id] : undefined) ?? EMPTY_FMT,   [formats,     selected?.id]);
 
   // Only runs renderWithFormats when there IS actual formatting — O(1) otherwise
+  // Uses liveContent so overlay stays in sync with typing without updating notes state
   const renderedContent = useMemo(() => {
     if (!noteHL.length && !noteFmt.length) return null;
-    if (!selected?.content) return null;
-    return renderWithFormats(selected.content, noteHL, noteFmt);
-  }, [selected?.content, noteHL, noteFmt]);
+    if (!liveContent) return null;
+    return renderWithFormats(liveContent, noteHL, noteFmt);
+  }, [liveContent, noteHL, noteFmt]);
 
   const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected?.id]);
 
+  // Word count based on liveContent — always current without touching notes state
   const wc = useMemo(() => selected ? {
-    words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0,
-    chars: selected.content.length,
-  } : null, [selected?.content]);
+    words: liveContent.trim() ? liveContent.trim().split(/\s+/).length : 0,
+    chars: liveContent.length,
+  } : null, [selected?.id, liveContent]);
 
   const hasSel = sel.start < sel.end;
 
@@ -288,7 +304,23 @@ export const Notes: React.FC = () => {
     saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
   }, []);
 
-  // ── Stable field updater — uses functional setState, no notes/selectedId in deps ──
+  // ── Content updater: liveContent updates instantly, notes state debounced 300ms ──
+  // This prevents re-rendering the entire component tree on every keystroke
+  const updateContent = useCallback((value: string) => {
+    setLiveContent(value);
+    const sid = selectedIdRef.current;
+    if (!sid) return;
+    if (contentSyncTimer.current) clearTimeout(contentSyncTimer.current);
+    contentSyncTimer.current = setTimeout(() => {
+      setNotes(prev => {
+        const updated = prev.map(n => n.id === sid ? { ...n, content: value, updatedAt: Date.now() } : n);
+        scheduleSave(updated);
+        return updated;
+      });
+    }, 300);
+  }, [scheduleSave]);
+
+  // ── Stable field updater for title/tags (non-content fields) ──
   const updateField = useCallback((field: keyof Note, value: string) => {
     const sid = selectedIdRef.current;
     if (!sid) return;
@@ -520,6 +552,20 @@ export const Notes: React.FC = () => {
 
   // Stable callbacks for NoteItem — don't change between renders
   const handleSelectNote = useCallback((id: string) => {
+    // Flush any pending content update before switching notes
+    if (contentSyncTimer.current) {
+      clearTimeout(contentSyncTimer.current);
+      contentSyncTimer.current = null;
+      const sid = selectedIdRef.current;
+      const val = liveContentRef.current;
+      if (sid) {
+        setNotes(prev => {
+          const updated = prev.map(n => n.id === sid ? { ...n, content: val, updatedAt: Date.now() } : n);
+          saveNotes(updated);
+          return updated;
+        });
+      }
+    }
     setSelId(id); setMode("write"); setSel({ start: 0, end: 0 });
   }, []);
 
@@ -718,8 +764,8 @@ export const Notes: React.FC = () => {
                           <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
                             {renderedContent}
                           </div>
-                          <textarea ref={contentRef} value={selected.content}
-                            onChange={e => updateField("content", e.target.value)}
+                          <textarea ref={contentRef} value={liveContent}
+                            onChange={e => updateContent(e.target.value)}
                             onFocus={() => setEF(true)}
                             onBlur={e => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as globalThis.Node)) setEF(false); }}
                             onMouseUp={handleMouseUp}
@@ -728,8 +774,8 @@ export const Notes: React.FC = () => {
                           />
                         </>
                       ) : (
-                        <textarea ref={contentRef} value={selected.content}
-                          onChange={e => updateField("content", e.target.value)}
+                        <textarea ref={contentRef} value={liveContent}
+                          onChange={e => updateContent(e.target.value)}
                           onFocus={() => setEF(true)}
                           onBlur={e => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as globalThis.Node)) setEF(false); }}
                           onMouseUp={handleMouseUp}
@@ -841,13 +887,13 @@ export const Notes: React.FC = () => {
                   <div style={{ position: "relative", borderRadius: 16, boxShadow: "0 0 0 1px var(--c-border-sub)" }}>
                     <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
                       {renderedContent
-                        ?? (selected.content
-                          ? <span style={{ whiteSpace: "pre-wrap" }}>{selected.content}</span>
+                        ?? (liveContent
+                          ? <span style={{ whiteSpace: "pre-wrap" }}>{liveContent}</span>
                           : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
                         )
                       }
                     </div>
-                    <textarea ref={contentRef} value={selected.content} readOnly
+                    <textarea ref={contentRef} value={liveContent} readOnly
                       onMouseUp={handleMouseUp} onClick={handleMouseUp}
                       className="marker-select"
                       style={{ position: "absolute", inset: 0, cursor: "text", resize: "none", border: "none", outline: "none", padding: "16px 20px", fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", background: "transparent", WebkitTextFillColor: "transparent", caretColor: "transparent" }}
