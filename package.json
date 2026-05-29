@@ -16,7 +16,8 @@
     "build:macos-x86": "tauri build --target x86_64-apple-darwin",
     "build:macos-arm": "tauri build --target aarch64-apple-darwin",
     "icons": "node scripts/gen-icons.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:dmg": "bash scripts/build-dmg.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",
