@@ -245,9 +245,6 @@ export const Notes: React.FC = () => {
     saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
   }, []);
 
-  const resize = () => { const el = contentRef.current; if (!el) return; el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
-  useEffect(() => { resize(); }, [selected?.content]);
-
   const updateField = (field: keyof Note, value: string) => {
     if (!selectedId) return;
     const updated = notes.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n);
@@ -653,15 +650,22 @@ export const Notes: React.FC = () => {
                 {/* ── Write mode ── */}
                 {mode === "write" && (
                   <div style={{ position: "relative" }}>
-                    <div style={{ borderRadius: 16, transition: "box-shadow 0.2s", boxShadow: editorFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px var(--c-border-sub)" }}>
+                    <div style={{ position: "relative", borderRadius: 16, transition: "box-shadow 0.2s", boxShadow: editorFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px var(--c-border-sub)" }}>
+                      {/* Formatted text — in normal flow, determines container height */}
+                      <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
+                        {selected.content
+                          ? renderWithFormats(selected.content, noteHL, noteFmt)
+                          : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
+                        }
+                      </div>
+                      {/* Editable textarea on top — transparent text, visible caret */}
                       <textarea ref={contentRef} value={selected.content}
-                        onChange={e => { updateField("content", e.target.value); resize(); }}
-                        onInput={resize}
+                        onChange={e => updateField("content", e.target.value)}
                         onFocus={() => setEF(true)}
                         onBlur={e => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as globalThis.Node)) setEF(false); }}
-                        placeholder={t("write_placeholder")}
-                        className="w-full resize-none text-select overflow-hidden"
-                        style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", color: "var(--c-text-2)", caretColor: "var(--c-accent)", background: "transparent", border: "none", outline: "none", borderRadius: 14, minHeight: "70vh", display: "block" }}
+                        onMouseUp={handleMouseUp}
+                        className="resize-none text-select"
+                        style={{ position: "absolute", inset: 0, fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", color: "transparent", WebkitTextFillColor: "transparent", caretColor: "var(--c-accent)", background: "transparent", border: "none", outline: "none", borderRadius: 14, resize: "none", overflow: "hidden", cursor: "text" }}
                       />
                     </div>
                     {/* Draggable photo attachments */}
@@ -734,7 +738,7 @@ export const Notes: React.FC = () => {
                             {isImage ? (
                               <div style={{ borderRadius: 12, overflow: "hidden", cursor: "zoom-in" }}
                                 title="Двойной клик - открыть файл"
-                                onClick={e => e.StopPropagation()}
+                                onClick={e => e.stopPropagation()}
                                 onDoubleClick={e => { e.stopPropagation(); openFile(att); }}>
                                 <img src={att.thumbUrl} alt={att.name} style={{ width: "100%", display: "block", borderRadius: 12 }} />
                               </div>

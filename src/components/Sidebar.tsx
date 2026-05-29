@@ -106,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
         style={{ borderColor: "var(--c-border-sub)" }}
       >
         <div className="flex items-center justify-between">
-          <div className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>v0.1.0</div></div>
+          <div className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>v1.4.0</div></div>
       </div>
     </aside>
   );
