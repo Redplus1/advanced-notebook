@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon, GripVertical } from "lucide-react";
+import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang } from "../i18n";
 
@@ -14,19 +14,16 @@ interface FormatRange { start: number; end: number; format: "bold" | "italic" | 
 const STORAGE_KEY = "an_notes_v2";
 const ATTACH_KEY  = "an_note_attachments_v1";
 
-// Attachments stored on disk — only path + position in localStorage
 interface Attachment { id: string; noteId: string; name: string; filePath: string; thumbUrl: string; x: number; y: number; w: number; }
 function loadAttachments(): Record<string, Attachment[]> { try { return JSON.parse(localStorage.getItem(ATTACH_KEY) ?? "{}"); } catch { return {}; } }
 function saveAttachments(a: Record<string, Attachment[]>) { try { localStorage.setItem(ATTACH_KEY, JSON.stringify(a)); } catch {} }
 
-// Convert image bytes to base64 data URL (persistent, survives page reload)
 function bytesToDataUrl(bytes: number[], mimeType = "image/jpeg"): string {
   const arr = new Uint8Array(bytes);
   let binary = "";
   arr.forEach(b => binary += String.fromCharCode(b));
   return `data:${mimeType};base64,${btoa(binary)}`;
 }
-// For non-image files just return empty (show file icon instead)
 function bytesToUrl(bytes: number[], name = ""): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   const imageExts = ["jpg","jpeg","png","gif","webp","svg","bmp","heic"];
@@ -34,9 +31,10 @@ function bytesToUrl(bytes: number[], name = ""): string {
     const mime = ext === "svg" ? "image/svg+xml" : ext === "gif" ? "image/gif" : ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
     return bytesToDataUrl(bytes, mime);
   }
-  return ""; // non-image: show file icon
+  return "";
 }
-const HL_KEY = "an_highlights_v1";
+
+const HL_KEY  = "an_highlights_v1";
 const FMT_KEY = "an_formats_v1";
 
 function loadNotes(): Note[] { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : []; } catch { return []; } }
@@ -58,7 +56,6 @@ function relDate(ts: number): string {
   return new Date(ts).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-
 // ─── Highlight colors ──────────────────────────────────────────────────────────
 
 const COLORS = [
@@ -71,16 +68,26 @@ const hBg   = (id: string) => `var(--hl-${id}-bg)`;
 const hText = (id: string) => `var(--hl-${id}-text)`;
 const hDot  = (id: string) => `var(--hl-${id}-dot)`;
 
+// Outside component — no need to recreate on every render
+const WIDTH_PRESETS = [600, 720, 900];
+const WIDTH_LABELS  = ["Compact", "Normal", "Wide"];
+
 // ─── renderWithFormats ─────────────────────────────────────────────────────────
 
 function renderWithFormats(text: string, hls: HighlightRange[], fmts: FormatRange[]): React.ReactNode[] {
   if (!hls.length && !fmts.length) return [<span key="t" style={{ whiteSpace: "pre-wrap" }}>{text}</span>];
   type Ann = { hl?: string; bold?: boolean; italic?: boolean };
   const ann: Ann[] = Array.from({ length: text.length }, () => ({}));
-  for (const r of hls) for (let i = r.start; i < Math.min(r.end, text.length); i++) ann[i] = { ...ann[i], hl: r.color };
-  for (const r of fmts) for (let i = r.start; i < Math.min(r.end, text.length); i++) {
-    if (r.format === "bold" || r.format === "bold-italic") ann[i] = { ...ann[i], bold: true };
-    if (r.format === "italic" || r.format === "bold-italic") ann[i] = { ...ann[i], italic: true };
+  for (const r of hls) {
+    if (r.start >= text.length) continue;
+    for (let i = r.start; i < Math.min(r.end, text.length); i++) ann[i] = { ...ann[i], hl: r.color };
+  }
+  for (const r of fmts) {
+    if (r.start >= text.length) continue;
+    for (let i = r.start; i < Math.min(r.end, text.length); i++) {
+      if (r.format === "bold" || r.format === "bold-italic") ann[i] = { ...ann[i], bold: true };
+      if (r.format === "italic" || r.format === "bold-italic") ann[i] = { ...ann[i], italic: true };
+    }
   }
   const nodes: React.ReactNode[] = [];
   let key = 0, i = 0;
@@ -176,7 +183,7 @@ const ResizeHandle: React.FC<{ onResize: (dx: number) => void }> = ({ onResize }
   const onMouseDown = (e: React.MouseEvent) => {
     dragging.current = true; lastX.current = e.clientX; e.preventDefault();
     const onMove = (ev: MouseEvent) => { if (!dragging.current) return; onResize(ev.clientX - lastX.current); lastX.current = ev.clientX; };
-    const onUp = () => { dragging.current = false; };
+    const onUp = () => { dragging.current = false; window.removeEventListener("mousemove", onMove); };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp, { once: true });
   };
@@ -188,7 +195,7 @@ const ResizeHandle: React.FC<{ onResize: (dx: number) => void }> = ({ onResize }
   );
 };
 
-// ─── Main Notes ────────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function fileEmoji(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
@@ -203,6 +210,8 @@ function fileEmoji(name: string): string {
   return '📎';
 }
 function fileExt(name: string): string { return name.split('.').pop() ?? ''; }
+
+// ─── Main Notes ────────────────────────────────────────────────────────────────
 
 export const Notes: React.FC = () => {
   useLang();
@@ -224,20 +233,40 @@ export const Notes: React.FC = () => {
   const attachInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef   = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const [resizingAttach, setResizingAttach] = useState<string | null>(null);
   const dragAttach = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const dragMovedRef = useRef(false);
-
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const titleRef   = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const selected = notes.find(n => n.id === selectedId) ?? null;
-  const filtered = search.trim() ? notes.filter(n => { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.toLowerCase().includes(q); }) : notes;
+  const selected = useMemo(() => notes.find(n => n.id === selectedId) ?? null, [notes, selectedId]);
+
+  // Memoized search filter — not recomputed on every keystroke
+  const filtered = useMemo(() =>
+    search.trim() ? notes.filter(n => { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.toLowerCase().includes(q); }) : notes,
+    [notes, search]
+  );
+
   const noteHL  = useMemo(() => selected ? highlights[selected.id] ?? [] : [], [highlights, selected]);
   const noteFmt = useMemo(() => selected ? formats[selected.id] ?? [] : [], [formats, selected]);
+
+  // Memoized rendered content — not recomputed unless content/highlights/formats change
+  const renderedContent = useMemo(() =>
+    selected?.content ? renderWithFormats(selected.content, noteHL, noteFmt) : null,
+    [selected?.content, noteHL, noteFmt]
+  );
+
+  const noteAttachments = useMemo(() => selected ? (attachments[selected.id] ?? []) : [], [attachments, selected]);
+
+  // Memoized word count
+  const wc = useMemo(() => selected ? {
+    words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0,
+    chars: selected.content.length
+  } : null, [selected?.content]);
+
+  const hasSel = sel.start < sel.end;
 
   const scheduleSave = useCallback((updated: Note[]) => {
     setDirty(true);
@@ -245,22 +274,22 @@ export const Notes: React.FC = () => {
     saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
   }, []);
 
-  const updateField = (field: keyof Note, value: string) => {
+  const updateField = useCallback((field: keyof Note, value: string) => {
     if (!selectedId) return;
     const updated = notes.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n);
     setNotes(updated); scheduleSave(updated);
-  };
+  }, [selectedId, notes, scheduleSave]);
 
-  const createNote = () => {
+  const createNote = useCallback(() => {
     const note: Note = { id: uid(), title: "", content: "", tags: "", createdAt: Date.now(), updatedAt: Date.now() };
     const next = [note, ...notes]; setNotes(next); setSelId(note.id); saveNotes(next); setDirty(false); setMode("write");
     setTimeout(() => titleRef.current?.focus(), 40);
-  };
+  }, [notes]);
 
-  const deleteNote = (id: string) => {
+  const deleteNote = useCallback((id: string) => {
     const next = notes.filter(n => n.id !== id); setNotes(next); saveNotes(next);
     if (selectedId === id) setSelId(next[0]?.id ?? null);
-  };
+  }, [notes, selectedId]);
 
   // Close attach menu on outside click
   useEffect(() => {
@@ -311,19 +340,41 @@ export const Notes: React.FC = () => {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [notes, sel]);
+  }, [createNote, sel]);
 
   const applyHL = useCallback((color: HColor, start: number, end: number) => {
     if (!selectedId || start >= end) return;
     const existing = highlights[selectedId] ?? [];
-    const filtered2 = existing.filter(r => r.end <= start || r.start >= end);
-    const next = { ...highlights, [selectedId]: [...filtered2, { start, end, color }].sort((a, b) => a.start - b.start) };
+    // Split any range that partially overlaps with new selection
+    const result: HighlightRange[] = [];
+    for (const r of existing) {
+      if (r.end <= start || r.start >= end) {
+        result.push(r); // no overlap
+      } else {
+        if (r.start < start) result.push({ ...r, end: start });
+        if (r.end > end) result.push({ ...r, start: end });
+      }
+    }
+    result.push({ start, end, color });
+    result.sort((a, b) => a.start - b.start);
+    const next = { ...highlights, [selectedId]: result };
     setHL(next); saveHL(next);
   }, [selectedId, highlights]);
 
   const removeHL = useCallback((start: number, end: number) => {
     if (!selectedId) return;
-    const next = { ...highlights, [selectedId]: (highlights[selectedId] ?? []).filter(r => !(r.start < end && r.end > start)) };
+    const existing = highlights[selectedId] ?? [];
+    // Split partially overlapping ranges instead of removing entirely
+    const result: HighlightRange[] = [];
+    for (const r of existing) {
+      if (r.end <= start || r.start >= end) {
+        result.push(r);
+      } else {
+        if (r.start < start) result.push({ ...r, end: start });
+        if (r.end > end) result.push({ ...r, start: end });
+      }
+    }
+    const next = { ...highlights, [selectedId]: result };
     setHL(next); saveHL(next);
   }, [selectedId, highlights]);
 
@@ -332,14 +383,36 @@ export const Notes: React.FC = () => {
     const s = start ?? sel.start; const e = end ?? sel.end;
     if (s >= e) return;
     const existing = formats[selectedId] ?? [];
-    const filtered2 = existing.filter(r => r.end <= s || r.start >= e);
-    const next = { ...formats, [selectedId]: [...filtered2, { start: s, end: e, format: fmt }].sort((a, b) => a.start - b.start) };
+    // Split any range that partially overlaps with new selection
+    const result: FormatRange[] = [];
+    for (const r of existing) {
+      if (r.end <= s || r.start >= e) {
+        result.push(r);
+      } else {
+        if (r.start < s) result.push({ ...r, end: s });
+        if (r.end > e) result.push({ ...r, start: e });
+      }
+    }
+    result.push({ start: s, end: e, format: fmt });
+    result.sort((a, b) => a.start - b.start);
+    const next = { ...formats, [selectedId]: result };
     setFmt(next); saveFmt(next);
   }, [selectedId, formats, sel]);
 
   const removeFmt = useCallback((start: number, end: number) => {
     if (!selectedId) return;
-    const next = { ...formats, [selectedId]: (formats[selectedId] ?? []).filter(r => !(r.start < end && r.end > start)) };
+    const existing = formats[selectedId] ?? [];
+    // Split partially overlapping ranges instead of removing entirely
+    const result: FormatRange[] = [];
+    for (const r of existing) {
+      if (r.end <= start || r.start >= end) {
+        result.push(r);
+      } else {
+        if (r.start < start) result.push({ ...r, end: start });
+        if (r.end > end) result.push({ ...r, start: end });
+      }
+    }
+    const next = { ...formats, [selectedId]: result };
     setFmt(next); saveFmt(next);
   }, [selectedId, formats]);
 
@@ -347,11 +420,11 @@ export const Notes: React.FC = () => {
   const handleMouseUp = useCallback(() => {
     const ta = contentRef.current;
     if (!ta) return;
-    let start = ta.selectionStart ?? 0;
-    let end   = ta.selectionEnd   ?? 0;
+    let start = Math.max(0, ta.selectionStart ?? 0);
+    let end   = Math.max(0, ta.selectionEnd   ?? 0);
     if (start < end) {
       const text = ta.value;
-      const W = /[a-zA-Z\u0430-\u044f\u0410-\u042f\u0451\u04010-9]/;
+      const W = /[\p{L}\p{N}]/u;
       while (start > 0 && W.test(text[start - 1] ?? "")) start--;
       while (end < text.length && W.test(text[end] ?? "")) end++;
       ta.setSelectionRange(start, end);
@@ -359,102 +432,63 @@ export const Notes: React.FC = () => {
     setSel({ start, end });
   }, []);
 
-  const noteAttachments = selected ? (attachments[selected.id] ?? []) : [];
-
-  const openFile = async (att: Attachment) => {
+  const openFile = useCallback(async (att: Attachment) => {
     const imgExts = ["jpg","jpeg","png","gif","webp","svg","bmp","heic","avif"];
     const ext = att.name.split(".").pop()?.toLowerCase() ?? "";
     const isImg = imgExts.includes(ext) || (att.thumbUrl?.startsWith("data:image") ?? false);
-    if (isImg) {
-      if (att.thumbUrl) { setLightboxUrl(att.thumbUrl); return; }
-    }
-    // Open with native OS — same as Files.tsx which works
+    if (isImg && att.thumbUrl) { setLightboxUrl(att.thumbUrl); return; }
     if (!att.filePath) return;
-    try {
-      await invoke("open_file_native", { path: att.filePath });
-    } catch (e) { console.error("open_file_native failed:", e); }
-  };
+    try { await invoke("open_file_native", { path: att.filePath }); } catch {}
+  }, []);
 
-  const addAttachment = (noteId: string, files: FileList | null) => {
+  const addAttachment = useCallback((noteId: string, files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
-      // Read as base64 data URL directly — works immediately, no Rust needed for preview
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-        const thumbUrl = ev.target?.result as string ?? "";
-        // Also save to disk via Rust (async, non-blocking)
-        let filePath = "";
-        try {
-          const { invoke } = await import("@tauri-apps/api/tauri");
-          const buf = await file.arrayBuffer();
-          filePath = await invoke<string>("save_attachment", {
-            noteId, fileName: file.name, data: Array.from(new Uint8Array(buf))
-          });
-        } catch {}
-        const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-        const isImg = file.type.startsWith("image/");
-        const a: Attachment = {
-          id, noteId, name: file.name,
-          filePath,
-          thumbUrl: isImg ? thumbUrl : "", // only store dataUrl for images
-          x: 20, y: 20, w: 240
-        };
-        setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
-      };
-      // For images read as data URL, for others just trigger onload with empty
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
       if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          const thumbUrl = ev.target?.result as string ?? "";
+          let filePath = "";
+          try {
+            const { invoke } = await import("@tauri-apps/api/tauri");
+            const buf = await file.arrayBuffer();
+            filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) });
+          } catch {}
+          const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl, x: 20, y: 20, w: 240 };
+          setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
+        };
         reader.readAsDataURL(file);
       } else {
-        // Non-image: fire manually
-        const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
         (async () => {
           let filePath = "";
           try {
             const { invoke } = await import("@tauri-apps/api/tauri");
             const buf = await file.arrayBuffer();
-            filePath = await invoke<string>("save_attachment", {
-              noteId, fileName: file.name, data: Array.from(new Uint8Array(buf))
-            });
+            filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) });
           } catch {}
           const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl: "", x: 20, y: 20, w: 240 };
           setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
         })();
       }
     }
-  };
+  }, []);
 
-  const removeAttachment = async (noteId: string, id: string) => {
+  const removeAttachment = useCallback(async (noteId: string, id: string) => {
     const att = (attachments[noteId]??[]).find(a => a.id === id);
     if (att?.filePath) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/tauri");
-        await invoke("delete_attachment", { path: att.filePath });
-      } catch {}
+      try { const { invoke } = await import("@tauri-apps/api/tauri"); await invoke("delete_attachment", { path: att.filePath }); } catch {}
     }
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).filter(a => a.id !== id) }; saveAttachments(next); return next; });
-  };
+  }, [attachments]);
 
-  const moveAttachment = (noteId: string, id: string, x: number, y: number) => {
+  const moveAttachment = useCallback((noteId: string, id: string, x: number, y: number) => {
     setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).map(a => a.id === id ? { ...a, x, y } : a) }; saveAttachments(next); return next; });
-  };
-  const resizeAttachment = (noteId: string, id: string, w: number) => {
-    setAttach(prev => {
-        const next = {
-            ...prev,
-            [noteId]: (prev[noteId] ?? []).map(a =>
-            a.id === id ? { ...a, w } : a
-        ),
-    };
+  }, []);
 
-    saveAttachments(next);
-    return next;
-  });
-};
-
-  const wc = selected ? { words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0, chars: selected.content.length } : null;
-  const widthPresets = [600, 720, 900];
-  const widthLabels  = ["Compact", "Normal", "Wide"];
-  const hasSel = sel.start < sel.end;
+  const resizeAttachment = useCallback((noteId: string, id: string, w: number) => {
+    setAttach(prev => { const next = { ...prev, [noteId]: (prev[noteId]??[]).map(a => a.id === id ? { ...a, w } : a) }; saveAttachments(next); return next; });
+  }, []);
 
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}>
@@ -515,7 +549,6 @@ export const Notes: React.FC = () => {
           <>
             {/* Toolbar */}
             <div className="flex items-center gap-3 px-6 py-2.5 border-b flex-shrink-0" style={{ borderColor: "var(--c-border-sub)" }}>
-              {/* Title with focus ring */}
               <div className="flex-1 min-w-0" style={{ borderRadius: 10, padding: "2px 8px", transition: "box-shadow 0.18s", boxShadow: titleFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px transparent" }}>
                 <input ref={titleRef} type="text" value={selected.title}
                   onChange={e => updateField("title", e.target.value)}
@@ -536,18 +569,16 @@ export const Notes: React.FC = () => {
               </div>
               {/* Width presets */}
               <div className="hidden md:flex items-center gap-0.5 rounded-xl p-1 flex-shrink-0" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
-                {widthPresets.map((w, i) => (
+                {WIDTH_PRESETS.map((w, i) => (
                   <button key={i} onClick={() => setEditorW(w)} className="px-2 py-1.5 rounded-lg text-[10px] font-mono transition-all"
                     style={{ background: editorMaxW === w ? "var(--c-accent)" : "transparent", color: editorMaxW === w ? "#fff" : "var(--c-text-4)" }}>
-                    {widthLabels[i]}
+                    {WIDTH_LABELS[i]}
                   </button>
                 ))}
               </div>
               <SaveBadge dirty={dirty} saving={saving} />
-              <input ref={attachInputRef} type="file" multiple className="hidden"
-                onChange={e => addAttachment(selected.id, e.target.files)} />
-              <input ref={fileInputRef} type="file" multiple className="hidden"
-                onChange={e => addAttachment(selected.id, e.target.files)} />
+              <input ref={attachInputRef} type="file" multiple className="hidden" onChange={e => addAttachment(selected.id, e.target.files)} />
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e => addAttachment(selected.id, e.target.files)} />
               <div style={{ position: "relative" }}>
                 <button onClick={() => setAttachMenuOpen(v => !v)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] transition-all select-none flex-shrink-0"
@@ -592,7 +623,6 @@ export const Notes: React.FC = () => {
             {/* Marker toolbar */}
             {mode === "read" && (
               <div className="flex items-center gap-2 px-4 py-2.5 border-b flex-shrink-0" style={{ borderColor: "var(--c-border-sub)", background: "var(--c-elevated)" }}>
-                {/* Color dots */}
                 <div className="flex items-center gap-1.5">
                   {COLORS.map(c => {
                     const isActive = activeColor === c.id;
@@ -603,7 +633,6 @@ export const Notes: React.FC = () => {
                   })}
                 </div>
                 <span style={{ width: 1, height: 18, background: "var(--c-border)", display: "inline-block", margin: "0 2px" }} />
-                {/* Format buttons */}
                 {(["bold", "italic", "bold-italic"] as const).map(fmt => (
                   <button key={fmt} onClick={() => { if (hasSel) applyFmt(fmt, sel.start, sel.end); }}
                     title={fmt === "bold" ? "Жирный ⌘B" : fmt === "italic" ? "Курсив ⌘I" : "Жирный курсив"}
@@ -614,17 +643,14 @@ export const Notes: React.FC = () => {
                     {fmt === "bold" ? "B" : fmt === "italic" ? "I" : "BI"}
                   </button>
                 ))}
-                {/* Apply highlight */}
                 <button onClick={() => { if (hasSel) applyHL(activeColor, sel.start, sel.end); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-500 transition-all"
                   style={{ background: hasSel ? hDot(activeColor) : "var(--c-border)", color: hasSel ? "#fff" : "var(--c-text-4)", border: "none", cursor: hasSel ? "pointer" : "default" }}>
                   <Highlighter size={11} />Выделить
                 </button>
-                {/* Selection info */}
                 <span className="text-[10px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>
                   {hasSel ? `${sel.end - sel.start} симв.` : "Кликни на слово"}
                 </span>
-                {/* Remove from selection */}
                 {hasSel && (
                   <div className="ml-auto flex items-center gap-1.5">
                     {noteFmt.length > 0 && (
@@ -647,18 +673,16 @@ export const Notes: React.FC = () => {
             {/* Content */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden">
               <div className="mx-auto px-8 py-8 pb-24" style={{ maxWidth: editorMaxW }}>
+
                 {/* ── Write mode ── */}
                 {mode === "write" && (
                   <div style={{ position: "relative" }}>
                     <div style={{ position: "relative", borderRadius: 16, transition: "box-shadow 0.2s", boxShadow: editorFocused ? "0 0 0 2px var(--c-accent), 0 0 0 5px var(--c-accent-focus-ring)" : "0 0 0 1px var(--c-border-sub)" }}>
                       {noteHL.length > 0 || noteFmt.length > 0 ? (
                         <>
-                          {/* Formatting overlay — only when highlights/formats exist */}
+                          {/* Formatting overlay — only rendered when highlights/formats exist */}
                           <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
-                            {selected.content
-                              ? renderWithFormats(selected.content, noteHL, noteFmt)
-                              : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
-                            }
+                            {renderedContent ?? <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>}
                           </div>
                           <textarea ref={contentRef} value={selected.content}
                             onChange={e => updateField("content", e.target.value)}
@@ -670,7 +694,6 @@ export const Notes: React.FC = () => {
                           />
                         </>
                       ) : (
-                        /* No formatting — plain fast textarea, same as original */
                         <textarea ref={contentRef} value={selected.content}
                           onChange={e => updateField("content", e.target.value)}
                           onFocus={() => setEF(true)}
@@ -682,7 +705,8 @@ export const Notes: React.FC = () => {
                         />
                       )}
                     </div>
-                    {/* Draggable photo attachments */}
+
+                    {/* Draggable attachments */}
                     {noteAttachments.map(att => {
                       const isImage = att.thumbUrl && (att.thumbUrl.startsWith("data:image") || att.thumbUrl.startsWith("blob:"));
                       return (
@@ -692,58 +716,33 @@ export const Notes: React.FC = () => {
                           onDragStart={e => e.preventDefault()}
                           onMouseDown={e => {
                             if ((e.target as HTMLElement).dataset.resize) return;
-
                             e.preventDefault();
                             e.stopPropagation();
-
                             const el = e.currentTarget as HTMLElement;
-
-                            const startX = e.clientX;
-                            const startY = e.clientY;
-                            const origX = att.x;
-                            const origY = att.y;
-
+                            const startX = e.clientX, startY = e.clientY;
+                            const origX = att.x, origY = att.y;
                             let moved = false;
-                            let lastX = origX;
-                            let lastY = origY;
-
+                            let lastX = origX, lastY = origY;
                             dragMovedRef.current = false;
                             dragAttach.current = { id: att.id, startX, startY, origX, origY };
-
                             document.body.style.cursor = "grabbing";
-
                             const onMove = (ev: MouseEvent) => {
-                                if (!dragAttach.current) return;
-
-                                const dx = ev.clientX - startX;
-                                const dy = ev.clientY - startY;
-
-                                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-                                    moved = true;
-                                    dragMovedRef.current = true;
-                                }
-
-                                if (!moved) return;
-
-                                lastX = origX + dx;
-                                lastY = origY + dy;
-
-                                el.style.transform = `translate(${dx}px, ${dy}px)`;
+                              if (!dragAttach.current) return;
+                              const dx = ev.clientX - startX, dy = ev.clientY - startY;
+                              if (Math.abs(dx) > 5 || Math.abs(dy) > 5) { moved = true; dragMovedRef.current = true; }
+                              if (!moved) return;
+                              lastX = Math.max(0, origX + dx);
+                              lastY = Math.max(0, origY + dy);
+                              el.style.transform = `translate(${dx}px, ${dy}px)`;
                             };
-
                             const onUp = () => {
-                                if (moved) {
-                                    el.style.transform = "";
-                                    moveAttachment(selected.id, att.id, lastX, lastY);
-                                }
-
-                                dragAttach.current = null;
-                                document.body.style.cursor = "";
-
-                                window.removeEventListener("mousemove", onMove);
-                                window.removeEventListener("mouseup", onUp);
+                              if (moved) { el.style.transform = ""; moveAttachment(selected.id, att.id, lastX, lastY); }
+                              dragAttach.current = null;
+                              dragMovedRef.current = false;
+                              document.body.style.cursor = "";
+                              window.removeEventListener("mousemove", onMove);
+                              window.removeEventListener("mouseup", onUp);
                             };
-
                             window.addEventListener("mousemove", onMove);
                             window.addEventListener("mouseup", onUp);
                           }}
@@ -751,14 +750,12 @@ export const Notes: React.FC = () => {
                           <div className="group relative" style={{ width: "100%", borderRadius: 12, overflow: "visible", boxShadow: "0 4px 20px rgba(0,0,0,0.2)", border: "1px solid var(--c-border)", cursor: "grab", background: "var(--c-surface)" }}>
                             {isImage ? (
                               <div style={{ borderRadius: 12, overflow: "hidden", cursor: "zoom-in" }}
-                                title="Двойной клик - открыть файл"
                                 onClick={e => e.stopPropagation()}
                                 onDoubleClick={e => { e.stopPropagation(); openFile(att); }}>
                                 <img src={att.thumbUrl} alt={att.name} style={{ width: "100%", display: "block", borderRadius: 12 }} />
                               </div>
                             ) : (
                               <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ minWidth: 160, cursor: "pointer" }}
-                                title="Двойной клик - открыть файл"
                                 onClick={e => e.stopPropagation()}
                                 onDoubleClick={e => { e.stopPropagation(); openFile(att); }}>
                                 <span style={{ fontSize: 24 }}>{fileEmoji(att.name)}</span>
@@ -768,59 +765,35 @@ export const Notes: React.FC = () => {
                                 </div>
                               </div>
                             )}
-                            {/* Controls */}
                             <div className="absolute -top-2.5 -right-2.5 opacity-0 group-hover:opacity-100 transition-all flex gap-1">
                               <button onClick={e => { e.stopPropagation(); removeAttachment(selected.id, att.id); }}
                                 style={{ width: 22, height: 22, borderRadius: "50%", background: "#f43f5e", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                                 <X size={10} />
                               </button>
                             </div>
-                            {/* Resize handle (bottom-right) — only on hover */}
-                            {/* Resize handle (bottom-right) — only on hover */}
                             {isImage && (
-                                <div
-                                    data-resize="true"
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                                    style={{
-                                        position: "absolute",
-                                        bottom: -6,
-                                        right: -6,
-                                        width: 14,
-                                        height: 14,
-                                        borderRadius: "50%",
-                                        background: "var(--c-accent)",
-                                        cursor: "se-resize",
-                                        border: "2px solid white",
-                                        zIndex: 20,
-                                    }}
+                              <div data-resize="true" className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                style={{ position: "absolute", bottom: -6, right: -6, width: 14, height: 14, borderRadius: "50%", background: "var(--c-accent)", cursor: "se-resize", border: "2px solid white", zIndex: 20 }}
                                 onMouseDown={e => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-
-                                    const card = e.currentTarget.closest(".group") as HTMLElement;
-                                    if (!card) return;
-
-                                    const startX = e.clientX;
-                                    const startW = att.w;
-                                    let lastW = startW;
-
-                                    const onMove = (ev: MouseEvent) => {
-                                        lastW = Math.max(80, startW + ev.clientX - startX);
-                                            card.style.width = `${lastW}px`;
-                                    };
-
-                                    const onUp = () => {
-                                        card.style.width = "";
-                                        resizeAttachment(selected.id, att.id, lastW);
-
-                                        window.removeEventListener("mousemove", onMove);
-                                        window.removeEventListener("mouseup", onUp);
-                                    };
-
-                                    window.addEventListener("mousemove", onMove);
-                                    window.addEventListener("mouseup", onUp, { once: true });
+                                  e.preventDefault(); e.stopPropagation();
+                                  const card = e.currentTarget.closest(".group") as HTMLElement;
+                                  if (!card) return;
+                                  const startX = e.clientX, startW = att.w;
+                                  let lastW = startW;
+                                  const onMove = (ev: MouseEvent) => {
+                                    lastW = Math.max(80, Math.min(800, startW + ev.clientX - startX));
+                                    card.style.width = `${lastW}px`;
+                                  };
+                                  const onUp = () => {
+                                    card.style.width = "";
+                                    resizeAttachment(selected.id, att.id, lastW);
+                                    window.removeEventListener("mousemove", onMove);
+                                    window.removeEventListener("mouseup", onUp);
+                                  };
+                                  window.addEventListener("mousemove", onMove);
+                                  window.addEventListener("mouseup", onUp, { once: true });
                                 }}
-                                />
+                              />
                             )}
                           </div>
                         </div>
@@ -847,14 +820,9 @@ export const Notes: React.FC = () => {
                 {/* ── Marker mode ── */}
                 {mode === "read" && (
                   <div style={{ position: "relative", borderRadius: 16, boxShadow: "0 0 0 1px var(--c-border-sub)" }}>
-                    {/* Formatted text — visible */}
                     <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
-                      {selected.content
-                        ? renderWithFormats(selected.content, noteHL, noteFmt)
-                        : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>
-                      }
+                      {renderedContent ?? <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>}
                     </div>
-                    {/* Invisible textarea for selection */}
                     <textarea ref={contentRef} value={selected.content} readOnly
                       onMouseUp={handleMouseUp} onClick={handleMouseUp}
                       className="marker-select"
