@@ -32,6 +32,11 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
+# Ad-hoc подпись — убирает ошибку "повреждён" без Apple Developer аккаунта
+echo "==> Signing app (ad-hoc)..."
+xattr -cr "$APP_PATH"
+codesign --force --deep --sign - "$APP_PATH"
+
 mkdir -p "src-tauri/target/${TARGET}/release/bundle/dmg"
 
 # create-dmg берёт папку-источник — кладём .app во временную папку
@@ -58,6 +63,12 @@ fi
 
 /opt/homebrew/bin/create-dmg "${CREATE_DMG_ARGS[@]}" "$DMG_OUT" "$STAGING"
 
+# Подписываем и сам DMG
+echo "==> Signing DMG (ad-hoc)..."
+codesign --force --sign - "$DMG_OUT"
+
 echo ""
 echo "==> Done!"
 echo "    $DMG_OUT"
+echo ""
+echo "  При первом запуске у пользователя: правой кнопкой → Открыть → Открыть"
