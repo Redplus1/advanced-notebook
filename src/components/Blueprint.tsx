@@ -768,6 +768,8 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
         deleteKeyCode={["Delete", "Backspace"]}
         minZoom={0.15} maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
+        onlyRenderVisibleElements
+        elevateNodesOnSelect={false}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="var(--c-rf-dot, #1c1c1f)" />
         <Controls showInteractive={false} />
