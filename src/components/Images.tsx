@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback, useMemo } from "react";
-import { Plus, FolderOpen, Trash2, Image as ImageIcon, X, Grid, ChevronLeft, Upload, Edit2, Check } from "lucide-react";
+import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { Plus, Trash2, Image as ImageIcon, X, Grid, ChevronLeft, Upload, Edit2, Check } from "lucide-react";
+import { invoke } from "@tauri-apps/api/tauri";
 import { useLang } from "../i18n";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -7,7 +8,10 @@ import { useLang } from "../i18n";
 interface ImageItem {
   id: string;
   name: string;
-  dataUrl: string;
+  /** Path on disk (AppData/attachments/…). The actual image lives here, NOT in localStorage. */
+  filePath: string;
+  /** Resolved URL for <img src> — held in memory only, never persisted to localStorage. */
+  dataUrl?: string;
   folderId: string;
   createdAt: number;
   width?: number;
@@ -27,10 +31,41 @@ const IMGS_KEY    = "an_images_v1";
 const FOLDERS_KEY = "an_img_folders_v1";
 
 function loadImages(): ImageItem[] { try { return JSON.parse(localStorage.getItem(IMGS_KEY) ?? "[]"); } catch { return []; } }
-function saveImages(i: ImageItem[]) { try { localStorage.setItem(IMGS_KEY, JSON.stringify(i)); } catch {} }
+// Persist METADATA ONLY. The image itself lives on disk (filePath). Stripping the heavy
+// base64 dataUrl is what prevents the localStorage quota overflow that silently dropped photos.
+function saveImages(i: ImageItem[]) {
+  try {
+    const slim = i.map(img => img.filePath ? { ...img, dataUrl: undefined } : img);
+    localStorage.setItem(IMGS_KEY, JSON.stringify(slim));
+  } catch {}
+}
 function loadFolders(): Folder[] { try { return JSON.parse(localStorage.getItem(FOLDERS_KEY) ?? "[]"); } catch { return []; } }
 function saveFolders(f: Folder[]) { try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(f)); } catch {} }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+
+// ─── Disk <-> data-url helpers ──────────────────────────────────────────────────
+
+function mimeFor(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "png")  return "image/png";
+  if (ext === "gif")  return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "svg")  return "image/svg+xml";
+  if (ext === "bmp")  return "image/bmp";
+  return "image/jpeg";
+}
+function bytesToDataUrl(bytes: number[], name: string): string {
+  const arr = new Uint8Array(bytes); let binary = "";
+  for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+  return `data:${mimeFor(name)};base64,${btoa(binary)}`;
+}
+function dataUrlToBytes(dataUrl: string): number[] {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const bin = atob(base64);
+  const out = new Array<number>(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 const FOLDER_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#06b6d4"];
 
@@ -61,6 +96,52 @@ export const Images: React.FC = () => {
     return counts;
   }, [images]);
 
+  // ── Load from disk + migrate legacy base64 images ──────────────────────────────
+  // On mount, resolve every image's <img src> from its on-disk file. Legacy items that
+  // were stored as base64 in localStorage (and could be silently dropped on quota
+  // overflow) are migrated onto disk once, then their base64 is freed from localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = loadImages();
+      if (list.length === 0) return;
+      let changed = false;
+
+      const resolved = await Promise.all(list.map(async img => {
+        // Already has a usable URL in memory — nothing to do.
+        if (img.dataUrl && img.filePath) return img;
+
+        // Legacy item: base64 in localStorage but never written to disk → migrate it.
+        if (img.dataUrl && !img.filePath) {
+          try {
+            const filePath = await invoke<string>("save_attachment", {
+              noteId: "images_" + (img.folderId || "root"),
+              fileName: img.name,
+              data: dataUrlToBytes(img.dataUrl),
+            });
+            changed = true;
+            return { ...img, filePath };
+          } catch { return img; }
+        }
+
+        // Normal item: read the picture back from disk into memory for display.
+        if (img.filePath) {
+          try {
+            const bytes = await invoke<number[]>("read_attachment", { path: img.filePath });
+            return { ...img, dataUrl: bytesToDataUrl(bytes, img.name) };
+          } catch { return img; }
+        }
+        return img;
+      }));
+
+      if (cancelled) return;
+      setImages(resolved);
+      // Re-persist so migrated items drop their base64 from localStorage for good.
+      if (changed) saveImages(resolved);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ── File upload ──────────────────────────────────────────────────────────────
 
   const handleFiles = useCallback((files: FileList | null) => {
@@ -70,12 +151,24 @@ export const Images: React.FC = () => {
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/")) return;
       const reader = new FileReader();
-      reader.onload = e => {
+      reader.onload = async e => {
         const dataUrl = e.target?.result as string;
+        // Persist the image bytes to disk (AppData/attachments) so it survives reloads
+        // and never inflates localStorage. Metadata-only goes to localStorage.
+        let filePath = "";
+        try {
+          const buf = await file.arrayBuffer();
+          filePath = await invoke<string>("save_attachment", {
+            noteId: "images_" + (targetFolder || "root"),
+            fileName: file.name,
+            data: Array.from(new Uint8Array(buf)),
+          });
+        } catch (err) { console.error("[Images] save_attachment failed:", err); }
+
         const img = new window.Image();
         img.onload = () => {
           const item: ImageItem = {
-            id: uid(), name: file.name, dataUrl,
+            id: uid(), name: file.name, filePath, dataUrl,
             folderId: targetFolder,
             createdAt: Date.now(),
             width: img.width, height: img.height,
@@ -104,6 +197,10 @@ export const Images: React.FC = () => {
 
   const deleteFolder = (id: string) => {
     const next = folders.filter(f => f.id !== id); setFolders(next); saveFolders(next);
+    // Remove the folder's images from disk too, so nothing is orphaned in AppData.
+    images.filter(i => i.folderId === id).forEach(i => {
+      if (i.filePath) invoke("delete_attachment", { path: i.filePath }).catch(() => {});
+    });
     const imgs = images.filter(i => i.folderId !== id); setImages(imgs); saveImages(imgs);
     if (activeFolder === id) setActiveFolder(null);
   };
@@ -115,6 +212,8 @@ export const Images: React.FC = () => {
   };
 
   const deleteImage = (id: string) => {
+    const target = images.find(i => i.id === id);
+    if (target?.filePath) invoke("delete_attachment", { path: target.filePath }).catch(() => {});
     const next = images.filter(i => i.id !== id); setImages(next); saveImages(next);
     if (lightbox?.id === id) setLightbox(null);
   };

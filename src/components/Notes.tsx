@@ -18,7 +18,18 @@ const FMT_KEY     = "an_formats_v1";
 
 interface Attachment { id: string; noteId: string; name: string; filePath: string; thumbUrl: string; x: number; y: number; w: number; }
 function loadAttachments(): Record<string, Attachment[]> { try { return JSON.parse(localStorage.getItem(ATTACH_KEY) ?? "{}"); } catch { return {}; } }
-function saveAttachments(a: Record<string, Attachment[]>) { try { localStorage.setItem(ATTACH_KEY, JSON.stringify(a)); } catch {} }
+// Persist METADATA ONLY. For disk-backed attachments the heavy base64 thumbUrl is dropped
+// (it is regenerated from disk via read_attachment on next launch) — this is what keeps
+// localStorage under quota so note attachments are never silently lost.
+function saveAttachments(a: Record<string, Attachment[]>) {
+  try {
+    const slim: Record<string, Attachment[]> = {};
+    for (const k of Object.keys(a)) {
+      slim[k] = a[k].map(att => att.filePath ? { ...att, thumbUrl: "" } : att);
+    }
+    localStorage.setItem(ATTACH_KEY, JSON.stringify(slim));
+  } catch {}
+}
 function bytesToDataUrl(bytes: number[], mimeType = "image/jpeg"): string {
   const arr = new Uint8Array(bytes); let binary = "";
   arr.forEach(b => binary += String.fromCharCode(b));
