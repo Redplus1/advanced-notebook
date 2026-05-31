@@ -69,11 +69,24 @@ function dataUrlToBytes(dataUrl: string): number[] {
 
 const FOLDER_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#06b6d4"];
 
+// Resolved data-urls survive tab switches (the component unmounts/remounts), so returning
+// to the Photos tab shows already-loaded pictures instantly instead of re-reading from disk.
+const urlCache = new Map<string, string>();
+
+// Hydrate freshly-loaded metadata with any data-url we already resolved this session.
+function hydrate(list: ImageItem[]): ImageItem[] {
+  return list.map(img =>
+    img.dataUrl ? img
+    : img.filePath && urlCache.has(img.filePath) ? { ...img, dataUrl: urlCache.get(img.filePath) }
+    : img
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export const Images: React.FC = () => {
   useLang();
-  const [images,  setImages]  = useState<ImageItem[]>(() => loadImages());
+  const [images,  setImages]  = useState<ImageItem[]>(() => hydrate(loadImages()));
   const [folders, setFolders] = useState<Folder[]>(() => loadFolders());
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<ImageItem | null>(null);
@@ -103,12 +116,12 @@ export const Images: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const list = loadImages();
+      const list = hydrate(loadImages());
       if (list.length === 0) return;
       let changed = false;
 
       const resolved = await Promise.all(list.map(async img => {
-        // Already has a usable URL in memory — nothing to do.
+        // Already has a usable URL in memory (incl. cache hits from a previous visit).
         if (img.dataUrl && img.filePath) return img;
 
         // Legacy item: base64 in localStorage but never written to disk → migrate it.
@@ -120,6 +133,7 @@ export const Images: React.FC = () => {
               data: dataUrlToBytes(img.dataUrl),
             });
             changed = true;
+            if (img.dataUrl) urlCache.set(filePath, img.dataUrl);
             return { ...img, filePath };
           } catch { return img; }
         }
@@ -128,7 +142,9 @@ export const Images: React.FC = () => {
         if (img.filePath) {
           try {
             const bytes = await invoke<number[]>("read_attachment", { path: img.filePath });
-            return { ...img, dataUrl: bytesToDataUrl(bytes, img.name) };
+            const dataUrl = bytesToDataUrl(bytes, img.name);
+            urlCache.set(img.filePath, dataUrl);
+            return { ...img, dataUrl };
           } catch { return img; }
         }
         return img;
@@ -165,6 +181,7 @@ export const Images: React.FC = () => {
           });
         } catch (err) { console.error("[Images] save_attachment failed:", err); }
 
+        if (filePath) urlCache.set(filePath, dataUrl);
         const img = new window.Image();
         img.onload = () => {
           const item: ImageItem = {
@@ -199,7 +216,7 @@ export const Images: React.FC = () => {
     const next = folders.filter(f => f.id !== id); setFolders(next); saveFolders(next);
     // Remove the folder's images from disk too, so nothing is orphaned in AppData.
     images.filter(i => i.folderId === id).forEach(i => {
-      if (i.filePath) invoke("delete_attachment", { path: i.filePath }).catch(() => {});
+      if (i.filePath) { urlCache.delete(i.filePath); invoke("delete_attachment", { path: i.filePath }).catch(() => {}); }
     });
     const imgs = images.filter(i => i.folderId !== id); setImages(imgs); saveImages(imgs);
     if (activeFolder === id) setActiveFolder(null);
@@ -213,7 +230,7 @@ export const Images: React.FC = () => {
 
   const deleteImage = (id: string) => {
     const target = images.find(i => i.id === id);
-    if (target?.filePath) invoke("delete_attachment", { path: target.filePath }).catch(() => {});
+    if (target?.filePath) { urlCache.delete(target.filePath); invoke("delete_attachment", { path: target.filePath }).catch(() => {}); }
     const next = images.filter(i => i.id !== id); setImages(next); saveImages(next);
     if (lightbox?.id === id) setLightbox(null);
   };
@@ -354,10 +371,22 @@ export const Images: React.FC = () => {
               {activeImages.map(img => (
                 <div key={img.id} className="group relative mb-3 break-inside-avoid cursor-zoom-in"
                   style={{ borderRadius: 16, overflow: "hidden", background: "var(--c-surface)" }}
-                  onClick={() => setLightbox(img)}>
-                  <img src={img.dataUrl} alt={img.name}
-                    className="w-full block transition-transform duration-300 group-hover:scale-105"
-                    style={{ display: "block" }} />
+                  onClick={() => img.dataUrl && setLightbox(img)}>
+                  {img.dataUrl ? (
+                    <img src={img.dataUrl} alt=""
+                      className="w-full block transition-transform duration-300 group-hover:scale-105"
+                      style={{ display: "block" }} />
+                  ) : (
+                    // Skeleton while the picture loads from disk — keeps the slot's size
+                    // (no layout jump) and never shows the raw file name.
+                    <div className="w-full flex items-center justify-center animate-pulse"
+                      style={{
+                        aspectRatio: img.width && img.height ? `${img.width} / ${img.height}` : "4 / 3",
+                        background: "var(--c-elevated)",
+                      }}>
+                      <ImageIcon size={24} strokeWidth={1.5} style={{ color: "var(--c-text-4)", opacity: 0.4 }} />
+                    </div>
+                  )}
                   {/* Overlay */}
                   <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-between p-3"
                     style={{ background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.6))" }}>
