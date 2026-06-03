@@ -434,6 +434,42 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
     setSel({ start, end });
   }, []);
 
+  // ─── Marker selection ──────────────────────────────────────────────────────
+  // Простая и точная система: текст выделяется прямо в видимом блоке, а
+  // позиции символов берутся из нативного выделения браузера (window.getSelection).
+  // Один источник истины = реальный отрендеренный текст, поэтому выделение
+  // всегда совпадает с тем, что видит пользователь — без смещения на строку.
+  const markerRef = useRef<HTMLDivElement>(null);
+
+  const handleMarkerSelect = useCallback(() => {
+    const container = markerRef.current;
+    if (!container) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setSel({ start: 0, end: 0 }); return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+      setSel({ start: 0, end: 0 }); return;
+    }
+    // Абсолютный индекс символа = длина текста от начала контейнера до точки.
+    const offsetOf = (node: Node, offset: number): number => {
+      const r = document.createRange();
+      r.setStart(container, 0);
+      r.setEnd(node, offset);
+      return r.toString().length;
+    };
+    let start = offsetOf(range.startContainer, range.startOffset);
+    let end   = offsetOf(range.endContainer, range.endOffset);
+    if (start > end) { const tmp = start; start = end; end = tmp; }
+    // Прилипание к границам слова — как раньше.
+    const text = container.textContent ?? "";
+    const W = /[a-zA-Zа-яА-ЯёЁ0-9]/;
+    while (start > 0 && W.test(text[start - 1] ?? "")) start--;
+    while (end < text.length && W.test(text[end] ?? "")) end++;
+    setSel({ start, end });
+  }, []);
+
   useEffect(() => {
     if (!attachMenuOpen) return;
     const close = () => setAttachMenuOpen(false);
@@ -779,16 +815,12 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                 {/* Marker mode */}
                 {mode === "read" && (
                   <div style={{ position: "relative", borderRadius: 16, boxShadow: "0 0 0 1px var(--c-border-sub)" }}>
-                    <div style={{ fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
+                    <div ref={markerRef} onMouseUp={handleMarkerSelect} className="text-select"
+                      style={{ userSelect: "text", WebkitUserSelect: "text", cursor: "text", fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", padding: "16px 20px", minHeight: "70vh", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--c-text-2)", borderRadius: 14 }}>
                       {renderedContent
                         ?? (selected.content ? <span style={{ whiteSpace: "pre-wrap" }}>{selected.content}</span> : <span style={{ color: "var(--c-text-4)", fontStyle: "italic" }}>{t("write_placeholder")}</span>)
                       }
                     </div>
-                    <textarea ref={contentRef} value={selected.content} readOnly
-                      onMouseUp={handleMouseUp} onClick={handleMouseUp}
-                      className="marker-select"
-                      style={{ position: "absolute", inset: 0, cursor: "text", resize: "none", border: "none", outline: "none", padding: "16px 20px", fontSize: 16, lineHeight: 1.9, fontFamily: "'IBM Plex Sans', sans-serif", background: "transparent", WebkitTextFillColor: "transparent", caretColor: "transparent" }}
-                    />
                   </div>
                 )}
               </div>
