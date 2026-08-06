@@ -786,14 +786,14 @@ export const Projects: React.FC = () => {
             <div className="text-center">
               <p className="text-[16px] font-600" style={{ color: "var(--c-text-2)" }}>{t("no_projects_title")}</p>
               <p className="text-[13px] mt-1.5 leading-relaxed max-w-[260px] mx-auto" style={{ color: "var(--c-text-3)" }}>
-                Create a project to organise your video with sections and a visual blueprint
+                {t("no_projects_hint")}
               </p>
             </div>
             <button
               onClick={createProject}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-[13px] font-500 transition-all active:scale-95" style={{ background: "var(--c-accent)", boxShadow: "0 4px 14px var(--c-accent)40" }}
             >
-              <Plus size={14} strokeWidth={2.5} />Create first project
+              <Plus size={14} strokeWidth={2.5} />{t("create_first")}
             </button>
           </div>
         ) : (

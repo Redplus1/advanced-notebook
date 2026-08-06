@@ -51,7 +51,10 @@ function getColor(id: string, theme: string) {
 }
 
 export interface BlockData { label: string; colorId: string; }
-export type BPNode = Node<BlockData>;
+export interface ImageBlockData { name: string; thumbUrl: string; filePath: string; }
+export interface FileBlockData { name: string; filePath: string; }
+export type BPNodeData = BlockData | ImageBlockData | FileBlockData;
+export type BPNode = Node<BPNodeData>;
 export type BPEdge = Edge;
 interface BPAttachment {
   id: string;
@@ -283,7 +286,110 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
   );
 };
 
-const nodeTypes = { videoBlock: VideoBlock };
+// ─── ImageBlock ────────────────────────────────────────────────────────────────
+
+const ImageBlock: React.FC<NodeProps<ImageBlockData>> = ({ data, selected }) => {
+  useLang();
+  const theme = useTheme();
+  const light = isLightTheme(theme);
+
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected} minWidth={100} minHeight={80} keepAspectRatio
+        color="var(--c-accent)"
+        handleStyle={{ width: 10, height: 10, borderRadius: 3, background: "var(--c-accent)", border: "2px solid #fff" }}
+        lineStyle={{ borderColor: "rgba(99,102,241,0.4)", borderStyle: "dashed" }}
+      />
+
+      <Handle type="source" position={Position.Top}    id="top"    style={{ ...HSTYLE, top:    -5 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ ...HSTYLE, bottom: -5 }} />
+      <Handle type="source" position={Position.Left}   id="left"   style={{ ...HSTYLE, left:   -5 }} />
+      <Handle type="source" position={Position.Right}  id="right"  style={{ ...HSTYLE, right:  -5 }} />
+
+      <div
+        onDoubleClick={() => window.dispatchEvent(new CustomEvent("an-bp-lightbox", { detail: data.thumbUrl }))}
+        title={t("bp_dbl_open_photo")}
+        style={{
+          width: "100%", height: "100%", borderRadius: 12, overflow: "hidden",
+          border: selected ? "2px solid var(--c-accent)" : "1px solid var(--c-border)",
+          boxShadow: selected
+            ? `0 8px 28px rgba(0,0,0,${light ? 0.12 : 0.5})`
+            : `0 2px 10px rgba(0,0,0,${light ? 0.06 : 0.25})`,
+          background: "var(--c-surface)", cursor: "zoom-in",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+        }}
+      >
+        <img
+          src={data.thumbUrl}
+          alt={data.name}
+          draggable={false}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" }}
+        />
+      </div>
+    </>
+  );
+};
+
+// ─── FileBlock ─────────────────────────────────────────────────────────────────
+
+const FileBlock: React.FC<NodeProps<FileBlockData>> = ({ data, selected }) => {
+  useLang();
+  const theme = useTheme();
+  const c = getColor("zinc", theme);
+
+  const openFile = useCallback(async () => {
+    if (!data.filePath) return;
+    try { await invoke("open_file_native", { path: data.filePath }); } catch {}
+  }, [data.filePath]);
+
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected} minWidth={140} minHeight={56}
+        color="var(--c-accent)"
+        handleStyle={{ width: 10, height: 10, borderRadius: 3, background: "var(--c-accent)", border: "2px solid #fff" }}
+        lineStyle={{ borderColor: "rgba(99,102,241,0.4)", borderStyle: "dashed" }}
+      />
+
+      <Handle type="source" position={Position.Top}    id="top"    style={{ ...HSTYLE, top:    -5 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ ...HSTYLE, bottom: -5 }} />
+      <Handle type="source" position={Position.Left}   id="left"   style={{ ...HSTYLE, left:   -5 }} />
+      <Handle type="source" position={Position.Right}  id="right"  style={{ ...HSTYLE, right:  -5 }} />
+
+      <div
+        onDoubleClick={openFile}
+        title={t("bp_dbl_open_file")}
+        style={{
+          width: "100%", height: "100%", borderRadius: 12, overflow: "hidden",
+          display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+          background: c.bg,
+          border: selected ? "2px solid var(--c-accent)" : `1px solid ${c.border}50`,
+          boxShadow: selected
+            ? `0 8px 28px rgba(0,0,0,${isLightTheme(theme) ? 0.12 : 0.5})`
+            : `0 2px 10px rgba(0,0,0,${isLightTheme(theme) ? 0.06 : 0.25})`,
+          cursor: "pointer",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+        }}
+      >
+        <span style={{ fontSize: 26, flexShrink: 0 }}>{fileEmoji(data.name)}</span>
+        <div style={{ minWidth: 0 }}>
+          <p style={{
+            margin: 0, fontSize: 12, fontWeight: 500, color: c.text,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {data.name}
+          </p>
+          <p style={{ margin: 0, fontSize: 10, color: `${c.text}88` }}>
+            {fileExt(data.name).toUpperCase()}
+          </p>
+        </div>
+      </div>
+    </>
+  );
+};
+
+const nodeTypes = { videoBlock: VideoBlock, imageBlock: ImageBlock, fileBlock: FileBlock };
 
 // ─── Deletable edge ────────────────────────────────────────────────────────────
 
@@ -354,17 +460,58 @@ interface BlueprintProps {
 
 export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, initialEdges, onChange }) => {
   useLang();
-  const [nodes, setNodes, onNodesChange] = useNodesState<BlockData>(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState<BPNodeData>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [attachments, setAttachments] = useState<Record<string, BPAttachment[]>>(loadBPAttachments);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dragMovedRef = useRef(false);
 
-  const projectAttachments = attachments[projectId] ?? [];
+  // Listen for double-click-to-preview events dispatched by ImageBlock nodes
+  useEffect(() => {
+    const h = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail;
+      if (url) setLightboxUrl(url);
+    };
+    window.addEventListener("an-bp-lightbox", h);
+    return () => window.removeEventListener("an-bp-lightbox", h);
+  }, []);
+
+  // One-time migration: older versions stored photos/files as a separate
+  // localStorage overlay instead of real blueprint nodes — pull them in
+  // so they gain zoom/pan/resize/connect behaviour like any other block.
+  useEffect(() => {
+    const legacy = loadBPAttachments();
+    const legacyForProject = legacy[projectId];
+    if (!legacyForProject || legacyForProject.length === 0) return;
+
+    const migrated: BPNode[] = legacyForProject.map(att => {
+      const isImg = !!att.thumbUrl;
+      return isImg
+        ? {
+            id: `node_${att.id}`,
+            type: "imageBlock",
+            position: { x: att.x, y: att.y },
+            data: { name: att.name, thumbUrl: att.thumbUrl, filePath: att.filePath },
+            style: { width: att.w, height: Math.round(att.w * 0.7) },
+          }
+        : {
+            id: `node_${att.id}`,
+            type: "fileBlock",
+            position: { x: att.x, y: att.y },
+            data: { name: att.name, filePath: att.filePath },
+            style: { width: Math.max(att.w, 160), height: 64 },
+          };
+    });
+
+    setNodes(ns => [...ns, ...migrated]);
+
+    const rest = { ...legacy };
+    delete rest[projectId];
+    saveBPAttachments(rest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
@@ -406,11 +553,14 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
     setEdges(es => es.filter(e => !e.selected));
   }, [setNodes, setEdges]);
 
+  // Photos/files are added as real ReactFlow nodes, so they pan, zoom,
+  // resize, select, delete, and connect via arrows exactly like a block.
   const addAttachment = useCallback((files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
       const isImg = file.type.startsWith("image/");
-      const attId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const nodeId = `node_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const position = { x: 140 + Math.random() * 320, y: 80 + Math.random() * 220 };
       const reader = new FileReader();
       reader.onload = async ev => {
         let filePath = "";
@@ -421,53 +571,27 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
             data: Array.from(new Uint8Array(buf)),
           });
         } catch {}
-        const att: BPAttachment = {
-          id: attId, projectId, name: file.name, filePath,
-          thumbUrl: isImg ? String(ev.target?.result ?? "") : "",
-          x: 80, y: 100, w: 240,
-        };
-        setAttachments(prev => {
-          const next = { ...prev, [projectId]: [...(prev[projectId] ?? []), att] };
-          saveBPAttachments(next);
-          return next;
-        });
+
+        if (isImg) {
+          const thumbUrl = String(ev.target?.result ?? "");
+          setNodes(ns => [...ns, {
+            id: nodeId, type: "imageBlock", position,
+            data: { name: file.name, thumbUrl, filePath },
+            style: { width: 220, height: 160 },
+          }]);
+        } else {
+          setNodes(ns => [...ns, {
+            id: nodeId, type: "fileBlock", position,
+            data: { name: file.name, filePath },
+            style: { width: 200, height: 64 },
+          }]);
+        }
       };
       if (isImg) reader.readAsDataURL(file);
       else reader.onload({ target: { result: "" } } as ProgressEvent<FileReader>);
     }
-  }, [projectId]);
+  }, [projectId, setNodes]);
 
-  const openAttachment = useCallback(async (att: BPAttachment) => {
-    const ext = fileExt(att.name);
-    const isImg = ["jpg","jpeg","png","gif","webp","svg","bmp","avif"].includes(ext);
-    if (isImg && att.thumbUrl) { setLightboxUrl(att.thumbUrl); return; }
-    if (!att.filePath) return;
-    try { await invoke("open_file_native", { path: att.filePath }); } catch {}
-  }, []);
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments(prev => {
-      const next = { ...prev, [projectId]: (prev[projectId] ?? []).filter(a => a.id !== id) };
-      saveBPAttachments(next);
-      return next;
-    });
-  }, [projectId]);
-
-  const moveAttachment = useCallback((id: string, x: number, y: number) => {
-    setAttachments(prev => {
-      const next = { ...prev, [projectId]: (prev[projectId] ?? []).map(a => a.id === id ? { ...a, x, y } : a) };
-      saveBPAttachments(next);
-      return next;
-    });
-  }, [projectId]);
-
-  const resizeAttachment = useCallback((id: string, w: number) => {
-    setAttachments(prev => {
-      const next = { ...prev, [projectId]: (prev[projectId] ?? []).map(a => a.id === id ? { ...a, w } : a) };
-      saveBPAttachments(next);
-      return next;
-    });
-  }, [projectId]);
   return (
     <div className="relative h-full w-full">
       {/* Toolbar */}
@@ -512,7 +636,7 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
             className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-[12px] transition-all shadow-lg backdrop-blur-sm"
             style={{ background: "var(--c-card)", border: "1px solid var(--c-border)", color: "var(--c-text-3)" }}
         >
-            <ImageIcon size={12} /> Фото
+            <ImageIcon size={12} /> {t("bp_add_photo")}
         </button>
 
         <button
@@ -520,7 +644,7 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
             className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-[12px] transition-all shadow-lg backdrop-blur-sm"
             style={{ background: "var(--c-card)", border: "1px solid var(--c-border)", color: "var(--c-text-3)" }}
         >
-            <Paperclip size={12} /> Файл
+            <Paperclip size={12} /> {t("bp_add_file")}
         </button>
         <div className="hidden lg:flex px-3 py-2 rounded-2xl text-[10px] font-mono gap-2 select-none backdrop-blur-sm"
           style={{ background: "var(--c-card)cc", border: "1px solid var(--c-border-sub)", color: "var(--c-text-4)" }}>
@@ -561,200 +685,6 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
           </div>
         </div>
       )}
-      {projectAttachments.map(att => {
-        const isImage = !!att.thumbUrl;
-
-        return (
-            <div
-                key={att.id}
-                style={{
-                    position: "absolute",
-                    left: att.x,
-                    top: att.y,
-                    width: att.w,
-                    zIndex: 20,
-                    userSelect: "none",
-                }}
-                draggable={false}
-                onDragStart={e => e.preventDefault()}
-                onMouseDown={e => {
-                    if ((e.target as HTMLElement).dataset.resize) return;
-
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    const el = e.currentTarget as HTMLElement;
-                    const startX = e.clientX;
-                    const startY = e.clientY;
-                    const origX = att.x;
-                    const origY = att.y;
-
-                    let moved = false;
-                    let lastX = origX;
-                    let lastY = origY;
-
-                    dragMovedRef.current = false;
-
-                    const onMove = (ev: MouseEvent) => {
-                        const dx = ev.clientX - startX;
-                        const dy = ev.clientY - startY;
-
-                        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-                            moved = true;
-                            dragMovedRef.current = true;
-                        }
-
-                        if (!moved) return;
-
-                        lastX = origX + dx;
-                        lastY = origY + dy;
-
-                        el.style.transform = `translate(${dx}px, ${dy}px)`;
-                    };
-
-                    const onUp = () => {
-                        el.style.transform = "";
-
-                        if (moved) {
-                            moveAttachment(att.id, lastX, lastY);
-                        }
-
-                        window.removeEventListener("mousemove", onMove);
-                        window.removeEventListener("mouseup", onUp);
-                    };
-
-                    window.addEventListener("mousemove", onMove);
-                    window.addEventListener("mouseup", onUp, { once: true });
-                }}
-            >
-             <div
-                className="group relative"
-                style={{
-                    width: "100%",
-                    borderRadius: 12,
-                    overflow: "visible",
-                    boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
-                    border: "1px solid var(--c-border)",
-                    cursor: "grab",
-                    background: "var(--c-surface)",
-                }}
-             >
-              {isImage ? (
-                <div
-                    style={{ borderRadius: 12, overflow: "hidden", cursor: "zoom-in" }}
-                    title="Двойной клик — открыть фото"
-                    onClick={e => e.stopPropagation()}
-                    onDoubleClick={e => {
-                        e.stopPropagation();
-                        if (!dragMovedRef.current) openAttachment(att);
-                    }}
-                >
-                <img
-                    src={att.thumbUrl}
-                    alt={att.name}
-                    draggable={false}
-                    style={{ width: "100%", display: "block", borderRadius: 12 }}
-                />
-                </div>
-              ) : (
-                <div
-                    className="flex items-center gap-2.5 px-3 py-2.5"
-                    style={{ minWidth: 160, cursor: "pointer" }}
-                    title="Двойной клик — открыть файл"
-                    onClick={e => e.stopPropagation()}
-                    onDoubleClick={e => {
-                        e.stopPropagation();
-                        if (!dragMovedRef.current) openAttachment(att);
-                    }}
-                >
-                    <span style={{ fontSize: 24 }}>{fileEmoji(att.name)}</span>
-                    <div className="min-w-0">
-                        <p
-                            className="text-[11px] font-500 truncate"
-                            style={{ color: "var(--c-text-1)", maxWidth: att.w - 60 }}
-                        >
-                            {att.name}
-                        </p>
-                            <p className="text-[10px]" style={{ color: "var(--c-text-4)" }}>
-                            {fileExt(att.name).toUpperCase()}
-                        </p>
-                    </div>
-                </div>
-              )}
-
-              <div className="absolute -top-2.5 -right-2.5 opacity-0 group-hover:opacity-100 transition-all flex gap-1">
-                <button
-                    onClick={e => {
-                        e.stopPropagation();
-                        removeAttachment(att.id);
-                    }}
-                    style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: "50%",
-                        background: "#f43f5e",
-                        color: "#fff",
-                        border: "none",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                    }}
-                >
-                    <X size={10} />
-                </button>
-               </div>
-
-              {isImage && (
-                <div
-                    data-resize="true"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{
-                        position: "absolute",
-                        bottom: -6,
-                        right: -6,
-                        width: 14,
-                        height: 14,
-                        borderRadius: "50%",
-                        background: "var(--c-accent)",
-                        cursor: "se-resize",
-                        border: "2px solid white",
-                        zIndex: 30,
-                    }}
-                    onMouseDown={e => {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        const card = e.currentTarget.closest(".group") as HTMLElement;
-                        if (!card) return;
-
-                        const startX = e.clientX;
-                        const startW = att.w;
-
-                        let lastW = startW;
-
-                        const onMove = (ev: MouseEvent) => {
-                            lastW = Math.max(80, startW + ev.clientX - startX);
-                            card.style.width = `${lastW}px`;
-                        };
-
-                        const onUp = () => {
-                            card.style.width = "";
-                            resizeAttachment(att.id, lastW);
-
-                            window.removeEventListener("mousemove", onMove);
-                            window.removeEventListener("mouseup", onUp);
-                        };
-
-                        window.addEventListener("mousemove", onMove);
-                        window.addEventListener("mouseup", onUp, { once: true });
-                    }}
-                />
-              )}
-             </div>
-            </div>
-        );
-      })}
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}

@@ -73,7 +73,7 @@ const T = {
     // Projects
     new_project: "New Project",
     no_projects_title: "No projects yet",
-    no_projects_hint: "Create a project to organise your video with sections and a visual blueprint",
+    no_projects_hint: "Create a project to organise it with sections and a visual blueprint",
     create_first: "Create first project",
     description_label: "Description",
     description_placeholder: "Add a description…",
@@ -103,6 +103,10 @@ const T = {
     node_hint: "double-click to edit · Del to remove",
     color_btn: "Color",
     dbl_to_edit: "Double-click to edit",
+    bp_add_photo: "Photo",
+    bp_add_file: "File",
+    bp_dbl_open_photo: "Double-click to open photo",
+    bp_dbl_open_file: "Double-click to open file",
 
     // Settings
     settings_title: "Settings",
@@ -179,7 +183,7 @@ const T = {
     // Projects
     new_project: "Новый проект",
     no_projects_title: "Проектов нет",
-    no_projects_hint: "Создайте проект для организации видео с разделами и схемой",
+    no_projects_hint: "Создайте проект, чтобы организовать его с разделами и схемой",
     create_first: "Создать первый проект",
     description_label: "Описание",
     description_placeholder: "Добавить описание…",
@@ -209,6 +213,10 @@ const T = {
     node_hint: "двойной клик · Del для удаления",
     color_btn: "Цвет",
     dbl_to_edit: "Двойной клик для редактирования",
+    bp_add_photo: "Фото",
+    bp_add_file: "Файл",
+    bp_dbl_open_photo: "Двойной клик — открыть фото",
+    bp_dbl_open_file: "Двойной клик — открыть файл",
 
     // Settings
     settings_title: "Настройки",
