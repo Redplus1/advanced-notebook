@@ -26,6 +26,7 @@ interface BlueprintData {
   nodes: BPNode[];
   edges: BPEdge[];
 }
+type ViewMode = "structure" | "blueprint";
 interface Project {
   id: string;
   title: string;
@@ -36,7 +37,6 @@ interface Project {
   createdAt: number;
   updatedAt: number;
 }
-type ViewMode = "structure" | "blueprint";
 
 // ─── Storage ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,17 @@ function load(): Project[] {
 function persist(projects: Project[]) {
   try { localStorage.setItem(KEY, JSON.stringify(projects)); }
   catch (e) { console.error("persist error:", e); }
+}
+
+// The Projects tab unmounts when you switch to another sidebar tab (Notes,
+// Tasks, …), so the mode switcher's choice must live outside component
+// state or it silently resets to "structure" every time you come back.
+const MODE_KEY = "an_projects_mode_v1";
+function loadMode(): ViewMode {
+  return localStorage.getItem(MODE_KEY) === "blueprint" ? "blueprint" : "structure";
+}
+function persistMode(m: ViewMode) {
+  try { localStorage.setItem(MODE_KEY, m); } catch {}
 }
 
 function uid() {
@@ -97,12 +108,12 @@ type SaveState = "idle" | "saving" | "saved";
 const SaveBadge: React.FC<{ state: SaveState }> = ({ state }) => {
   if (state === "saving") return (
     <span className="flex items-center gap-1.5 text-[11px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>
-      <Loader2 size={10} className="animate-spin" />Saving…
+      <Loader2 size={10} className="animate-spin" />{t("saving")}
     </span>
   );
   if (state === "saved") return (
     <span className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-600/70 select-none">
-      <Check size={10} strokeWidth={3} />Saved
+      <Check size={10} strokeWidth={3} />{t("saved")}
     </span>
   );
   return null;
@@ -333,7 +344,7 @@ const SectionBlock: React.FC<{
             ].join(" ")}
           >
             <Trash2 size={11} />
-            {confirmDel && <span>Sure?</span>}
+            {confirmDel && <span>{t("sure")}</span>}
           </button>
         </div>
       </div>
@@ -452,14 +463,30 @@ const ModeTab: React.FC<{
   </button>
 );
 
+// The exact same switcher is used in two places: the projects list header
+// (picks which view a click on a card opens into) and inside an open
+// project (switches the view you're currently looking at) — one shared
+// component, one shared `mode` state, so they never disagree.
+const ModeSwitcher: React.FC<{ mode: ViewMode; onChange: (m: ViewMode) => void }> = ({ mode, onChange }) => (
+  <div className="flex items-center gap-1 rounded-xl p-1 flex-shrink-0" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
+    <ModeTab active={mode === "structure"} onClick={() => onChange("structure")} icon={<AlignLeft size={12} />} label={t("mode_structure")} />
+    <ModeTab active={mode === "blueprint"} onClick={() => onChange("blueprint")} icon={<GitBranch size={12} />} label={t("mode_blueprint")} />
+  </div>
+);
+
 // ─── Main Projects component ────────────────────────────────────────────────────
 
 export const Projects: React.FC = () => {
   useLang();
-  const [projects, setProjects] = useState<Project[]>(() => load());
-  const [openId, setOpenId]     = useState<string | null>(null);
-  const [mode, setMode]         = useState<ViewMode>("structure");
+  const [projects, setProjects]   = useState<Project[]>(() => load());
+  const [openId, setOpenId]       = useState<string | null>(null);
+  const [mode, setModeState]      = useState<ViewMode>(loadMode);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  const setMode = useCallback((m: ViewMode) => {
+    setModeState(m);
+    persistMode(m);
+  }, []);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const open      = projects.find((p) => p.id === openId) ?? null;
@@ -491,6 +518,13 @@ export const Projects: React.FC = () => {
       prev.map((p) => p.id === id ? { ...p, ...changes, updatedAt: Date.now() } : p)
     );
   }, [mutate]);
+
+  // Opens a project straight into whichever view (structure/blueprint) is
+  // currently picked — the same `mode` switcher shown both in the projects
+  // list header and inside the open project (see ModeTab below).
+  const openProject = useCallback((id: string) => {
+    setOpenId(id);
+  }, []);
 
   // ── Project CRUD ──
   const createProject = () => {
@@ -636,20 +670,7 @@ export const Projects: React.FC = () => {
           <SaveBadge state={saveState} />
 
           {/* Mode switcher */}
-          <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: "var(--c-elevated)", border: "1px solid var(--c-border)" }}>
-            <ModeTab
-              active={mode === "structure"}
-              onClick={() => setMode("structure")}
-              icon={<AlignLeft size={12} />}
-              label={t("mode_structure")}
-            />
-            <ModeTab
-              active={mode === "blueprint"}
-              onClick={() => setMode("blueprint")}
-              icon={<GitBranch size={12} />}
-              label={t("mode_blueprint")}
-            />
-          </div>
+          <ModeSwitcher mode={mode} onChange={setMode} />
         </div>
 
         {/* ── Content ── */}
@@ -694,7 +715,7 @@ export const Projects: React.FC = () => {
                     onClick={() => addSection(open.id)}
                     className="flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg transition-all" style={{ color: "var(--c-text-3)" }}
                   >
-                    <Plus size={12} />Add section
+                    <Plus size={12} />{t("add_section")}
                   </button>
                 </div>
 
@@ -769,12 +790,16 @@ export const Projects: React.FC = () => {
                 : `${projects.length} project${projects.length !== 1 ? "s" : ""}`}
             </p>
           </div>
-          <button
-            onClick={createProject}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-[13px] font-500 transition-all active:scale-95" style={{ background: "var(--c-accent)", boxShadow: "0 4px 14px var(--c-accent)40" }} onMouseEnter={e => e.currentTarget.style.opacity="0.9"} onMouseLeave={e => e.currentTarget.style.opacity="1"}
-          >
-            <Plus size={14} strokeWidth={2.5} />{t("new_project")}
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Which view clicking a project card opens into */}
+            <ModeSwitcher mode={mode} onChange={setMode} />
+            <button
+              onClick={createProject}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-[13px] font-500 transition-all active:scale-95" style={{ background: "var(--c-accent)", boxShadow: "0 4px 14px var(--c-accent)40" }} onMouseEnter={e => e.currentTarget.style.opacity="0.9"} onMouseLeave={e => e.currentTarget.style.opacity="1"}
+            >
+              <Plus size={14} strokeWidth={2.5} />{t("new_project")}
+            </button>
+          </div>
         </div>
 
         {/* Empty state */}
@@ -805,7 +830,7 @@ export const Projects: React.FC = () => {
               <ProjectCard
                 key={p.id}
                 project={p}
-                onOpen={() => { setOpenId(p.id); setMode("structure"); }}
+                onOpen={() => openProject(p.id)}
                 onDelete={() => deleteProject(p.id)}
               />
             ))}

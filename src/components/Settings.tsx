@@ -16,6 +16,18 @@ export function getBorderWidth(): number {
   return Number(localStorage.getItem("vss_border_width") ?? "3");
 }
 
+// Corner style of the lines connecting blocks (not the connection dots).
+// Blueprint.tsx reads this itself (readLineShape) and listens for the event
+// to redraw open edges live, the same way it reacts to border-width changes.
+export type LineShape = "round" | "square";
+export function applyLineShape(shape: LineShape) {
+  localStorage.setItem("vss_line_shape", shape);
+  window.dispatchEvent(new CustomEvent("vss-line-shape", { detail: shape }));
+}
+export function getLineShape(): LineShape {
+  return (localStorage.getItem("vss_line_shape") as LineShape) ?? "round";
+}
+
 // ─── Theme definitions ─────────────────────────────────────────────────────────
 
 interface ThemeDef {
@@ -139,14 +151,60 @@ const BorderSlider: React.FC<{ value: number; onChange: (n: number) => void }> =
   </div>
 );
 
+// ─── Connecting-line shape picker ───────────────────────────────────────────────
+// Previews the two edge styles Blueprint actually draws: a sharp right-angle
+// elbow ("square") vs. a smooth bezier curve ("round") — matching what you
+// see in the canvas, not just a rounded corner on the same elbow shape.
+
+const LineShapePreview: React.FC<{ shape: LineShape; color: string }> = ({ shape, color }) => (
+  <svg width="34" height="24" viewBox="0 0 34 24" fill="none">
+    {shape === "square" ? (
+      <path d="M5 20 L5 8 L29 8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    ) : (
+      <path d="M5 20 C5 8 5 8 29 8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    )}
+    <circle cx="5" cy="20" r="2.5" fill={color} />
+    <circle cx="29" cy="8" r="2.5" fill={color} />
+  </svg>
+);
+
+const LINE_SHAPES: { id: LineShape; labelKey: string }[] = [
+  { id: "round",  labelKey: "line_round" },
+  { id: "square", labelKey: "line_square" },
+];
+
+const LineShapePicker: React.FC<{ value: LineShape; onChange: (s: LineShape) => void }> = ({ value, onChange }) => (
+  <div className="flex items-center gap-3">
+    {LINE_SHAPES.map(s => (
+      <button
+        key={s.id}
+        onClick={() => onChange(s.id)}
+        className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-150 active:scale-95"
+        style={{
+          background: "var(--c-elevated)",
+          boxShadow: value === s.id ? `0 0 0 2px var(--c-accent)` : `0 0 0 1px var(--c-border)`,
+          opacity: value === s.id ? 1 : 0.7,
+        }}
+      >
+        <LineShapePreview shape={s.id} color={value === s.id ? "var(--c-accent)" : "var(--c-text-4)"} />
+        <span className="text-[12px] font-500" style={{ color: value === s.id ? "var(--c-text-1)" : "var(--c-text-3)" }}>
+          {t(s.labelKey as any)}
+        </span>
+        {value === s.id && <Check size={12} strokeWidth={3} style={{ color: "var(--c-accent)" }} />}
+      </button>
+    ))}
+  </div>
+);
+
 // ─── Settings component ────────────────────────────────────────────────────────
 
 export const SettingsTab: React.FC = () => {
   useLang();
-  const [theme,      setTheme]      = useState<ThemeId>(getSavedTheme);
-  const [lang,       setLangState]  = useState<Lang>(getLang);
-  const [borderW,    setBorderW]    = useState<number>(getBorderWidth);
-  const [saved,      setSaved]      = useState(false);
+  const [theme,     setTheme]     = useState<ThemeId>(getSavedTheme);
+  const [lang,      setLangState] = useState<Lang>(getLang);
+  const [borderW,   setBorderW]   = useState<number>(getBorderWidth);
+  const [lineShape, setLineShape] = useState<LineShape>(getLineShape);
+  const [saved,     setSaved]     = useState(false);
 
   const handleTheme = (id: ThemeId) => { applyTheme(id); setTheme(id); };
 
@@ -156,6 +214,11 @@ export const SettingsTab: React.FC = () => {
     setBorderW(n);
     localStorage.setItem("vss_border_width", String(n));
     window.dispatchEvent(new CustomEvent("vss-border-width", { detail: n }));
+  };
+
+  const handleLineShape = (s: LineShape) => {
+    setLineShape(s);
+    applyLineShape(s);
   };
 
   const handleSave = () => {
@@ -191,9 +254,16 @@ export const SettingsTab: React.FC = () => {
 
         {/* Blueprint */}
         <Section title="Blueprint" hint={t("border_width_hint")}>
-          <div className="rounded-2xl p-5" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
-            <p className="text-[13px] font-500 mb-4" style={{ color: "var(--c-text-2)" }}>{t("border_width")}</p>
-            <BorderSlider value={borderW} onChange={handleBorderW} />
+          <div className="rounded-2xl p-5 flex flex-col gap-6" style={{ background: "var(--c-surface)", border: "1px solid var(--c-border)" }}>
+            <div>
+              <p className="text-[13px] font-500 mb-4" style={{ color: "var(--c-text-2)" }}>{t("border_width")}</p>
+              <BorderSlider value={borderW} onChange={handleBorderW} />
+            </div>
+            <div>
+              <p className="text-[13px] font-500 mb-1" style={{ color: "var(--c-text-2)" }}>{t("line_shape")}</p>
+              <p className="text-[11px] mb-4" style={{ color: "var(--c-text-4)" }}>{t("line_shape_hint")}</p>
+              <LineShapePicker value={lineShape} onChange={handleLineShape} />
+            </div>
           </div>
         </Section>
 
@@ -202,7 +272,7 @@ export const SettingsTab: React.FC = () => {
           <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--c-border)", background: "var(--c-surface)" }}>
             {[
               ["App", "Advanced Notebook"],
-              ["Version", "1.4.0"],
+              ["Version", "1.6.0"],
               ["Stack", "Tauri · React · TypeScript · SQLite · React Flow"],
             ].map(([k, v], i) => (
               <div key={k} className="flex items-center justify-between px-5 py-3.5" style={{ borderTop: i > 0 ? "1px solid var(--c-border)" : "none" }}>

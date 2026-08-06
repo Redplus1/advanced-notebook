@@ -69,6 +69,10 @@ const T = {
     project_placeholder: "Project title…",
     border_width: "Block border width",
     border_width_hint: "Left stripe thickness in Blueprint blocks (0 = hidden)",
+    line_shape: "Connecting line shape",
+    line_shape_hint: "Corner style of the lines drawn between blocks",
+    line_round: "Round",
+    line_square: "Square",
 
     // Projects
     new_project: "New Project",
@@ -102,11 +106,14 @@ const T = {
     bp_hint_del: "Del to remove",
     node_hint: "double-click to edit · Del to remove",
     color_btn: "Color",
+    font_size_btn: "Font size",
     dbl_to_edit: "Double-click to edit",
     bp_add_photo: "Photo",
     bp_add_file: "File",
     bp_dbl_open_photo: "Double-click to open photo",
     bp_dbl_open_file: "Double-click to open file",
+    bp_bring_front: "Bring to front",
+    bp_send_back: "Send to back",
 
     // Settings
     settings_title: "Settings",
@@ -179,6 +186,10 @@ const T = {
     project_placeholder: "Название проекта…",
     border_width: "Ширина обводки блоков",
     border_width_hint: "Толщина цветной полоски в блоках Blueprint (0 = скрыть)",
+    line_shape: "Форма соединительных линий",
+    line_shape_hint: "Форма углов линий, соединяющих блоки",
+    line_round: "Скруглённые",
+    line_square: "Квадратные",
 
     // Projects
     new_project: "Новый проект",
@@ -212,11 +223,14 @@ const T = {
     bp_hint_del: "Del для удаления",
     node_hint: "двойной клик · Del для удаления",
     color_btn: "Цвет",
+    font_size_btn: "Размер шрифта",
     dbl_to_edit: "Двойной клик для редактирования",
     bp_add_photo: "Фото",
     bp_add_file: "Файл",
     bp_dbl_open_photo: "Двойной клик — открыть фото",
     bp_dbl_open_file: "Двойной клик — открыть файл",
+    bp_bring_front: "На передний план",
+    bp_send_back: "На задний план",
 
     // Settings
     settings_title: "Настройки",

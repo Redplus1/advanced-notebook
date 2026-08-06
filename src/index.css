@@ -345,9 +345,11 @@
 
 .react-flow__handle {
   width: 10px !important; height: 10px !important;
+  box-sizing: border-box !important;
   background: transparent !important;
   border: 1.5px solid transparent !important;
-  transition: background 0.18s, border-color 0.18s, transform 0.18s, opacity 0.18s !important;
+  border-radius: 50% !important;
+  transition: background 0.18s, border-color 0.18s, transform 0.18s, opacity 0.18s, box-shadow 0.18s !important;
   opacity: 0 !important;
 }
 /* Handles appear when hovering the node */
@@ -362,6 +364,7 @@
   opacity: 1 !important;
   background: var(--c-accent) !important;
   border-color: var(--c-accent) !important;
+  box-shadow: 0 0 0 4px var(--c-accent)22 !important;
   transform: scale(1.35) !important;
 }
 

@@ -1,19 +1,29 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import ReactFlow, {
   Background, Controls, Handle, Position, MarkerType,
   BackgroundVariant, ConnectionMode, NodeResizer, addEdge,
-  useNodesState, useEdgesState, useReactFlow,
-  BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
+  useNodesState, useEdgesState, useReactFlow, useStore,
+  BaseEdge, EdgeLabelRenderer, getSmoothStepPath, getBezierPath,
   type Connection, type Edge, type Node, type NodeProps, type EdgeProps,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { Plus, Check, Loader2, GitBranch, Trash2, X, Paperclip, Image as ImageIcon } from "lucide-react";
+import { Plus, GitBranch, Trash2, X, Paperclip, Image as ImageIcon, ChevronUp, ChevronDown, ArrowUp, ArrowDown } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang, useTheme, isLightTheme } from "../i18n";
 
 // Read border width directly from localStorage (avoids circular import)
 function readBorderWidth(): number {
   return Number(localStorage.getItem("vss_border_width") ?? "3");
+}
+
+// Same trick for the connecting-line style set in Settings. "square" keeps
+// the sharp-elbow step path; "round" switches to an actual smooth bezier
+// curve — a step path with a rounded corner still reads as "square" next to
+// the (always-bezier) line you see while dragging a new connection, so
+// rounding the corner isn't enough to match that look.
+type LineShape = "round" | "square";
+function readLineShape(): LineShape {
+  return (localStorage.getItem("vss_line_shape") as LineShape) ?? "round";
 }
 
 // ─── Color palettes ────────────────────────────────────────────────────────────
@@ -50,7 +60,7 @@ function getColor(id: string, theme: string) {
   return (palette as unknown as Array<{id:string;bg:string;border:string;text:string}>).find(p => p.id === id) ?? palette[0];
 }
 
-export interface BlockData { label: string; colorId: string; }
+export interface BlockData { label: string; colorId: string; fontSize?: number; }
 export interface ImageBlockData { name: string; thumbUrl: string; filePath: string; }
 export interface FileBlockData { name: string; filePath: string; }
 export type BPNodeData = BlockData | ImageBlockData | FileBlockData;
@@ -87,6 +97,38 @@ function fileExt(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? "";
 }
 
+// Fit an image's natural size into a reasonable initial block size while
+// preserving its real aspect ratio, so it's never stretched or cropped.
+const IMAGE_MAX_DIM = 320;
+const IMAGE_MIN_DIM = 100;
+
+function fitImageSize(naturalW: number, naturalH: number): { width: number; height: number } {
+  if (!naturalW || !naturalH) return { width: 220, height: 160 };
+  const aspect = naturalW / naturalH;
+  let width = naturalW;
+  let height = naturalH;
+
+  if (width > IMAGE_MAX_DIM || height > IMAGE_MAX_DIM) {
+    if (aspect >= 1) { width = IMAGE_MAX_DIM; height = Math.round(IMAGE_MAX_DIM / aspect); }
+    else { height = IMAGE_MAX_DIM; width = Math.round(IMAGE_MAX_DIM * aspect); }
+  }
+  if (width < IMAGE_MIN_DIM && height < IMAGE_MIN_DIM) {
+    if (aspect >= 1) { width = IMAGE_MIN_DIM; height = Math.round(IMAGE_MIN_DIM / aspect); }
+    else { height = IMAGE_MIN_DIM; width = Math.round(IMAGE_MIN_DIM * aspect); }
+  }
+
+  return { width: Math.max(Math.round(width), IMAGE_MIN_DIM), height: Math.max(Math.round(height), 80) };
+}
+
+function loadImageSize(url: string): Promise<{ width: number; height: number }> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(fitImageSize(img.naturalWidth, img.naturalHeight));
+    img.onerror = () => resolve({ width: 220, height: 160 });
+    img.src = url;
+  });
+}
+
 function fileEmoji(name: string) {
   const ext = fileExt(name);
   if (["pdf"].includes(ext)) return "📕";
@@ -102,6 +144,15 @@ function fileEmoji(name: string) {
 
 const HSTYLE: React.CSSProperties = { width: 10, height: 10, zIndex: 10 };
 
+// Text blocks default to this font size. The size is no longer derived from
+// the block's dimensions — the user sets it directly with the up/down
+// stepper in the block's floating toolbar (see the JSX below).
+const TEXT_DEFAULT_FONT = 13;
+const TEXT_MIN_FONT = 9;
+const TEXT_MAX_FONT = 40;
+const TEXT_FONT_STEP = 1;
+const TEXT_DEFAULT_HEIGHT = 90;
+
 const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
   useLang();
   const theme   = useTheme();
@@ -112,6 +163,17 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
   const { setNodes }  = useReactFlow();
   const textRef       = useRef<HTMLTextAreaElement>(null);
   const paletteRef    = useRef<HTMLDivElement>(null);
+  const contentRef    = useRef<HTMLDivElement>(null);
+
+  // True while the user is actively dragging a NodeResizer handle. Auto-grow
+  // must stay out of the way during that gesture — otherwise a live height
+  // bump can fight the drag and it reads as "I can't resize this thing
+  // horizontally, it just keeps stretching down".
+  const isResizing = useStore(
+    useCallback(s => !!s.nodeInternals.get(id)?.resizing, [id])
+  );
+
+  const fontSize = data.fontSize ?? TEXT_DEFAULT_FONT;
 
   // Listen to border width changes from Settings
   useEffect(() => {
@@ -130,6 +192,33 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
     return () => document.removeEventListener("mousedown", h);
   }, [showPalette]);
 
+  // Auto-grow: if the text no longer fits the block's current height, grow
+  // the block just enough to fit it (never shrink automatically). Dragging a
+  // corner handle still resizes width and height freely — this only kicks in
+  // when content genuinely overflows what's there.
+  //
+  // While editing, overflow must be measured on the textarea itself
+  // (scrollHeight vs its own clientHeight). Measuring the wrapper div
+  // instead is wrong: a height:100% textarea's rendered box always reports
+  // as fully filling the wrapper regardless of text length, so the wrapper
+  // never "overflows" from real content — but it also never grows, or worse,
+  // if the textarea's box-sizing adds its own padding on top of that 100%,
+  // the wrapper looks like it overflows on *every* run, and the block
+  // ratchets taller and taller on every keystroke/observer tick.
+  useLayoutEffect(() => {
+    if (isResizing) return; // manual drag always wins while it's happening
+    const el = editing ? textRef.current : contentRef.current;
+    if (!el) return;
+    const overflow = el.scrollHeight - el.clientHeight;
+    if (overflow > 1) {
+      setNodes(ns => ns.map(n => {
+        if (n.id !== id) return n;
+        const curH = typeof n.style?.height === "number" ? n.style.height : TEXT_DEFAULT_HEIGHT;
+        return { ...n, style: { ...n.style, height: Math.ceil(curH + overflow) } };
+      }));
+    }
+  }, [draft, data.label, fontSize, editing, id, setNodes, isResizing]);
+
   const commit = useCallback(() => {
     const val = draft.trim() || t("block_default");
     setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, label: val } } : n));
@@ -141,13 +230,22 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
     setShowPalette(false);
   }, [id, setNodes]);
 
+  const adjustFont = useCallback((delta: number) => {
+    setNodes(ns => ns.map(n => {
+      if (n.id !== id) return n;
+      const cur = (n.data as BlockData).fontSize ?? TEXT_DEFAULT_FONT;
+      const next = Math.min(TEXT_MAX_FONT, Math.max(TEXT_MIN_FONT, cur + delta));
+      return { ...n, data: { ...n.data, fontSize: next } };
+    }));
+  }, [id, setNodes]);
+
   const c = getColor(data.colorId, theme);
   const light = isLightTheme(theme);
 
   return (
     <>
       <NodeResizer
-        isVisible={selected} minWidth={140} minHeight={64}
+        isVisible={selected} minWidth={140} minHeight={36}
         color="var(--c-accent)"
         handleStyle={{ width: 10, height: 10, borderRadius: 3, background: "var(--c-accent)", border: "2px solid #fff" }}
         lineStyle={{ borderColor: "rgba(99,102,241,0.4)", borderStyle: "dashed" }}
@@ -189,8 +287,10 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
           : `0 2px 10px rgba(0,0,0,${light ? 0.06 : 0.25})`,
         transition: "border-color 0.15s, box-shadow 0.15s, border-width 0.15s",
       }}>
-        {/* Content */}
-        <div style={{ flex: 1, padding: "10px 12px 8px", overflow: "hidden" }}>
+        {/* Content — text stays pinned top-left as normal. Font size is set
+            manually via the stepper in the floating toolbar below, not
+            derived from the block's size. */}
+        <div ref={contentRef} style={{ flex: 1, minHeight: 0, padding: "6px 10px", overflow: "hidden" }}>
           {editing ? (
             <textarea
               ref={textRef}
@@ -203,18 +303,18 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
               }}
               className="nodrag nowheel text-select"
               style={{
-                width: "100%", height: "100%",
+                width: "100%", height: "100%", boxSizing: "border-box",
                 background: light ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.35)",
                 border: `1px solid ${c.border}50`,
-                borderRadius: 6, padding: "6px 8px", outline: "none", resize: "none",
-                color: c.text, fontSize: 13, lineHeight: 1.6,
+                borderRadius: 6, padding: "4px 6px", outline: "none", resize: "none",
+                color: c.text, fontSize, lineHeight: 1.6,
                 caretColor: "var(--c-accent)",
                 fontFamily: "'IBM Plex Sans', sans-serif",
               }}
             />
           ) : (
             <p onDoubleClick={() => setEditing(true)} style={{
-              margin: 0, color: c.text, fontSize: 13, lineHeight: 1.65,
+              margin: 0, color: c.text, fontSize, lineHeight: 1.65,
               cursor: "default", whiteSpace: "pre-wrap",
               wordBreak: "break-word", userSelect: "none", overflow: "hidden",
             }}>
@@ -227,61 +327,89 @@ const VideoBlock: React.FC<NodeProps<BlockData>> = ({ id, data, selected }) => {
           )}
         </div>
 
-        {/* Bottom toolbar */}
-        {selected && !editing && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 4,
-            padding: "4px 8px",
-            borderTop: `1px solid ${c.border}30`,
-            background: light ? "rgba(0,0,0,0.04)" : "rgba(0,0,0,0.2)",
-            flexShrink: 0, position: "relative",
-          }}>
-            <div ref={paletteRef} style={{ position: "relative" }}>
-              <button
-                onClick={() => setShowPalette(v => !v)}
-                className="nodrag"
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "2px 8px", borderRadius: 6,
-                  border: `1px solid ${c.border}40`,
-                  background: light ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.25)",
-                  cursor: "pointer", color: c.text, fontSize: 10,
-                  fontFamily: "'IBM Plex Mono', monospace",
-                }}
-              >
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.border, display: "inline-block", flexShrink: 0 }} />
-                {t("color_btn")}
-              </button>
-
-              {showPalette && (
-                <div className="nodrag" style={{
-                  position: "absolute", bottom: "calc(100% + 6px)", left: 0,
-                  display: "flex", gap: 6, padding: "8px 10px",
-                  background: light ? "#fff" : "#1a1a1f",
-                  border: `1px solid ${light ? "#e0ddd8" : "#3f3f46"}`,
-                  borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.2)", zIndex: 200,
-                }}>
-                  {getPalette(theme).map((p: any) => (
-                    <button
-                      key={p.id} onClick={() => setColor(p.id as ColorId)}
-                      className="nodrag" title={p.id}
-                      style={{
-                        width: 18, height: 18, borderRadius: "50%", background: p.border,
-                        border: data.colorId === p.id ? "2px solid var(--c-text-1)" : "2px solid transparent",
-                        cursor: "pointer", transform: data.colorId === p.id ? "scale(1.25)" : "scale(1)",
-                        transition: "transform 0.1s", flexShrink: 0,
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-            <span style={{ marginLeft: "auto", color: light ? `${c.text}55` : `${c.text}33`, fontSize: 9, fontFamily: "monospace", userSelect: "none" }}>
-              dbl · del
-            </span>
-          </div>
-        )}
       </div>
+
+      {/* Toolbar — a floating overlay, not part of the block's layout, so
+          opening it never pushes the block taller or leaves empty space. */}
+      {selected && (
+        <div className="nodrag" style={{ position: "absolute", top: 6, right: 6, zIndex: 20, display: "flex", gap: 4 }}>
+          {/* Manual font size stepper */}
+          <div className="nodrag" style={{
+            display: "flex", flexDirection: "column", borderRadius: 5, overflow: "hidden",
+            border: `1px solid ${light ? "#e0ddd8" : "#3f3f46"}`,
+            background: light ? "#fff" : "#1a1a1f",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+          }}>
+            <button
+              onClick={() => adjustFont(TEXT_FONT_STEP)}
+              className="nodrag" title={`${t("font_size_btn")} +`}
+              disabled={fontSize >= TEXT_MAX_FONT}
+              style={{
+                width: 16, height: 13, display: "flex", alignItems: "center", justifyContent: "center",
+                border: "none", background: "transparent", padding: 0,
+                color: light ? "#3f3f46" : "#e4e4e8",
+                cursor: fontSize >= TEXT_MAX_FONT ? "default" : "pointer",
+                opacity: fontSize >= TEXT_MAX_FONT ? 0.35 : 1,
+              }}
+            >
+              <ChevronUp size={11} strokeWidth={2.5} />
+            </button>
+            <button
+              onClick={() => adjustFont(-TEXT_FONT_STEP)}
+              className="nodrag" title={`${t("font_size_btn")} -`}
+              disabled={fontSize <= TEXT_MIN_FONT}
+              style={{
+                width: 16, height: 13, display: "flex", alignItems: "center", justifyContent: "center",
+                border: "none", borderTop: `1px solid ${light ? "#e0ddd8" : "#3f3f46"}`, background: "transparent", padding: 0,
+                color: light ? "#3f3f46" : "#e4e4e8",
+                cursor: fontSize <= TEXT_MIN_FONT ? "default" : "pointer",
+                opacity: fontSize <= TEXT_MIN_FONT ? 0.35 : 1,
+              }}
+            >
+              <ChevronDown size={11} strokeWidth={2.5} />
+            </button>
+          </div>
+
+          {/* Color picker */}
+          <div ref={paletteRef} className="nodrag" style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowPalette(v => !v)}
+              className="nodrag"
+              title={t("color_btn")}
+              style={{
+                width: 16, height: 16, borderRadius: "50%", padding: 0,
+                background: c.border,
+                border: light ? "2px solid #ffffffcc" : "2px solid #18181bcc",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+                cursor: "pointer",
+              }}
+            />
+
+            {showPalette && (
+              <div className="nodrag" style={{
+                position: "absolute", top: "calc(100% + 6px)", right: 0,
+                display: "flex", gap: 6, padding: "8px 10px",
+                background: light ? "#fff" : "#1a1a1f",
+                border: `1px solid ${light ? "#e0ddd8" : "#3f3f46"}`,
+                borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.2)", zIndex: 200,
+              }}>
+                {getPalette(theme).map((p: any) => (
+                  <button
+                    key={p.id} onClick={() => setColor(p.id as ColorId)}
+                    className="nodrag" title={p.id}
+                    style={{
+                      width: 18, height: 18, borderRadius: "50%", background: p.border,
+                      border: data.colorId === p.id ? "2px solid var(--c-text-1)" : "2px solid transparent",
+                      cursor: "pointer", transform: data.colorId === p.id ? "scale(1.25)" : "scale(1)",
+                      transition: "transform 0.1s", flexShrink: 0,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 };
@@ -324,7 +452,7 @@ const ImageBlock: React.FC<NodeProps<ImageBlockData>> = ({ data, selected }) => 
           src={data.thumbUrl}
           alt={data.name}
           draggable={false}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" }}
+          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", pointerEvents: "none" }}
         />
       </div>
     </>
@@ -398,10 +526,18 @@ const DeletableEdge: React.FC<EdgeProps> = ({
   sourcePosition, targetPosition, selected, markerEnd, style,
 }) => {
   const { setEdges } = useReactFlow();
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX, sourceY, sourcePosition,
-    targetX, targetY, targetPosition,
-  });
+  const [lineShape, setLineShape] = useState<LineShape>(readLineShape);
+
+  // Listen for the corner-style change from Settings
+  useEffect(() => {
+    const h = (e: Event) => setLineShape((e as CustomEvent<LineShape>).detail);
+    window.addEventListener("vss-line-shape", h);
+    return () => window.removeEventListener("vss-line-shape", h);
+  }, []);
+
+  const [edgePath, labelX, labelY] = lineShape === "round"
+    ? getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+    : getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 0 });
 
   return (
     <>
@@ -462,7 +598,6 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
   useLang();
   const [nodes, setNodes, onNodesChange] = useNodesState<BPNodeData>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -507,6 +642,14 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
 
     setNodes(ns => [...ns, ...migrated]);
 
+    // Correct the placeholder aspect ratio used above once the real image
+    // dimensions are known, so migrated photos aren't stretched/cropped.
+    legacyForProject.filter(att => !!att.thumbUrl).forEach(att => {
+      loadImageSize(att.thumbUrl).then(({ width, height }) => {
+        setNodes(ns => ns.map(n => n.id === `node_${att.id}` ? { ...n, style: { ...n.style, width, height } } : n));
+      });
+    });
+
     const rest = { ...legacy };
     delete rest[projectId];
     saveBPAttachments(rest);
@@ -521,11 +664,7 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
   useEffect(() => {
     if (skipFirst.current) { skipFirst.current = false; return; }
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      setSaveState("saving");
-      onChangeRef.current(nodes, edges);
-      setTimeout(() => { setSaveState("saved"); setTimeout(() => setSaveState("idle"), 2000); }, 250);
-    }, 900);
+    saveTimer.current = setTimeout(() => { onChangeRef.current(nodes, edges); }, 900);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [nodes, edges]);
 
@@ -553,6 +692,24 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
     setEdges(es => es.filter(e => !e.selected));
   }, [setNodes, setEdges]);
 
+  // Layering: node.zIndex (not style.zIndex) is what React Flow actually
+  // uses for stacking order, so bumping the selected node's zIndex above
+  // the current max — or below the current min — moves it in front of or
+  // behind every other block without touching anyone else's value.
+  const bringToFront = useCallback(() => {
+    setNodes(ns => {
+      const maxZ = Math.max(0, ...ns.map(n => n.zIndex ?? 0));
+      return ns.map(n => n.selected ? { ...n, zIndex: maxZ + 1 } : n);
+    });
+  }, [setNodes]);
+
+  const sendToBack = useCallback(() => {
+    setNodes(ns => {
+      const minZ = Math.min(0, ...ns.map(n => n.zIndex ?? 0));
+      return ns.map(n => n.selected ? { ...n, zIndex: minZ - 1 } : n);
+    });
+  }, [setNodes]);
+
   // Photos/files are added as real ReactFlow nodes, so they pan, zoom,
   // resize, select, delete, and connect via arrows exactly like a block.
   const addAttachment = useCallback((files: FileList | null) => {
@@ -574,10 +731,11 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
 
         if (isImg) {
           const thumbUrl = String(ev.target?.result ?? "");
+          const { width, height } = await loadImageSize(thumbUrl);
           setNodes(ns => [...ns, {
             id: nodeId, type: "imageBlock", position,
             data: { name: file.name, thumbUrl, filePath },
-            style: { width: 220, height: 160 },
+            style: { width, height },
           }]);
         } else {
           setNodes(ns => [...ns, {
@@ -646,6 +804,31 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
         >
             <Paperclip size={12} /> {t("bp_add_file")}
         </button>
+
+        <div className="flex items-center rounded-2xl overflow-hidden shadow-lg backdrop-blur-sm"
+          style={{ border: "1px solid var(--c-border)" }}>
+          <button
+              onClick={bringToFront}
+              title={t("bp_bring_front")}
+              className="flex items-center px-2.5 py-2 transition-all duration-150"
+              style={{ background: "var(--c-card)", color: "var(--c-text-3)" }}
+              onMouseEnter={e => { e.currentTarget.style.color = "var(--c-text-1)"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "var(--c-text-3)"; }}
+          >
+              <ArrowUp size={13} />
+          </button>
+          <button
+              onClick={sendToBack}
+              title={t("bp_send_back")}
+              className="flex items-center px-2.5 py-2 transition-all duration-150"
+              style={{ background: "var(--c-card)", color: "var(--c-text-3)", borderLeft: "1px solid var(--c-border)" }}
+              onMouseEnter={e => { e.currentTarget.style.color = "var(--c-text-1)"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "var(--c-text-3)"; }}
+          >
+              <ArrowDown size={13} />
+          </button>
+        </div>
+
         <div className="hidden lg:flex px-3 py-2 rounded-2xl text-[10px] font-mono gap-2 select-none backdrop-blur-sm"
           style={{ background: "var(--c-card)cc", border: "1px solid var(--c-border-sub)", color: "var(--c-text-4)" }}>
           <span>{t("bp_hint_connect")}</span>
@@ -656,21 +839,8 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
         </div>
       </div>
 
-      {/* Save indicator */}
-      <div className="absolute top-4 right-4 z-10">
-        {saveState === "saving" && (
-          <span className="flex items-center gap-1.5 text-[11px] font-mono px-3 py-1.5 rounded-xl backdrop-blur-sm"
-            style={{ background: "var(--c-card)ee", border: "1px solid var(--c-border)", color: "var(--c-text-3)" }}>
-            <Loader2 size={10} className="animate-spin" />{t("saving")}
-          </span>
-        )}
-        {saveState === "saved" && (
-          <span className="flex items-center gap-1.5 text-[11px] font-mono px-3 py-1.5 rounded-xl backdrop-blur-sm"
-            style={{ background: "var(--c-card)ee", border: "1px solid var(--c-border)", color: "#10b981" }}>
-            <Check size={10} strokeWidth={3} />{t("saved")}
-          </span>
-        )}
-      </div>
+      {/* Save state is already shown once, next to the mode switcher in the
+          project header — no need to duplicate it here inside the canvas. */}
 
       {/* Empty hint */}
       {nodes.length === 0 && (
