@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { Check, Moon, Sun, Flower, Leaf, Monitor } from "lucide-react";
 import { t, useLang, changeLang, getLang, type Lang } from "../i18n";
+import { writeString } from "../lib/storage";
 
 export type ThemeId = "dark" | "midnight" | "soft-light" | "pastel-rose" | "pastel-mint";
 
 export function applyTheme(id: ThemeId) {
   document.documentElement.setAttribute("data-theme", id);
-  localStorage.setItem("vss_theme", id);
+  writeString("vss_theme", id);
   window.dispatchEvent(new CustomEvent("vss-theme", { detail: id }));
 }
 export function getSavedTheme(): ThemeId {
@@ -21,7 +22,7 @@ export function getBorderWidth(): number {
 // to redraw open edges live, the same way it reacts to border-width changes.
 export type LineShape = "round" | "square";
 export function applyLineShape(shape: LineShape) {
-  localStorage.setItem("vss_line_shape", shape);
+  writeString("vss_line_shape", shape);
   window.dispatchEvent(new CustomEvent("vss-line-shape", { detail: shape }));
 }
 export function getLineShape(): LineShape {
@@ -212,7 +213,7 @@ export const SettingsTab: React.FC = () => {
 
   const handleBorderW = (n: number) => {
     setBorderW(n);
-    localStorage.setItem("vss_border_width", String(n));
+    writeString("vss_border_width", String(n));
     window.dispatchEvent(new CustomEvent("vss-border-width", { detail: n }));
   };
 
@@ -272,7 +273,7 @@ export const SettingsTab: React.FC = () => {
           <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--c-border)", background: "var(--c-surface)" }}>
             {[
               ["App", "Advanced Notebook"],
-              ["Version", "1.6.0"],
+              ["Version", "1.6.1"],
               ["Stack", "Tauri · React · TypeScript · SQLite · React Flow"],
             ].map(([k, v], i) => (
               <div key={k} className="flex items-center justify-between px-5 py-3.5" style={{ borderTop: i > 0 ? "1px solid var(--c-border)" : "none" }}>

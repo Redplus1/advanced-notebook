@@ -10,6 +10,7 @@ import "reactflow/dist/style.css";
 import { Plus, GitBranch, Trash2, X, Paperclip, Image as ImageIcon, ChevronUp, ChevronDown, ArrowUp, ArrowDown } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang, useTheme, isLightTheme } from "../i18n";
+import { readJSON, writeJSON } from "../lib/storage";
 
 // Read border width directly from localStorage (avoids circular import)
 function readBorderWidth(): number {
@@ -80,21 +81,146 @@ interface BPAttachment {
 const BP_ATTACH_KEY = "an_blueprint_attachments_v1";
 
 function loadBPAttachments(): Record<string, BPAttachment[]> {
-  try {
-    return JSON.parse(localStorage.getItem(BP_ATTACH_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
+  return readJSON<Record<string, BPAttachment[]>>(BP_ATTACH_KEY, {});
 }
 
 function saveBPAttachments(a: Record<string, BPAttachment[]>) {
-  try {
-    localStorage.setItem(BP_ATTACH_KEY, JSON.stringify(a));
-  } catch {}
+  writeJSON(BP_ATTACH_KEY, a);
 }
 
 function fileExt(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+// ─── Blueprint persistence ─────────────────────────────────────────────────────
+//
+// An imageBlock's `thumbUrl` is a base64 data-url of the whole photo. Writing
+// that into the project record meant a single 2 MB picture became ~2.7 MB of
+// JSON in localStorage, and the origin quota (~5 MB) was blown after the first
+// one — every later setItem threw and the failure was swallowed, so the canvas
+// froze at whatever had last been written. The photo bytes already live on disk
+// under AppData/attachments (see `save_attachment`), so the persisted node only
+// needs its `filePath`; the data-url is rebuilt from disk on the next launch.
+
+function mimeFor(name: string): string {
+  const ext = fileExt(name);
+  if (ext === "png")  return "image/png";
+  if (ext === "gif")  return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "svg")  return "image/svg+xml";
+  if (ext === "bmp")  return "image/bmp";
+  return "image/jpeg";
+}
+
+function bytesToDataUrl(bytes: number[], name: string): string {
+  const arr = new Uint8Array(bytes);
+  let binary = "";
+  // Chunked so a large picture doesn't blow the argument limit of String.fromCharCode.
+  const CHUNK = 0x8000;
+  for (let i = 0; i < arr.length; i += CHUNK) {
+    binary += String.fromCharCode(...arr.subarray(i, i + CHUNK));
+  }
+  return `data:${mimeFor(name)};base64,${btoa(binary)}`;
+}
+
+function dataUrlToBytes(dataUrl: string): number[] {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const bin = atob(base64);
+  const out = new Array<number>(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Data-urls resolved this session, keyed by disk path. Switching tabs unmounts
+// the canvas, so without this every visit re-reads every photo from disk.
+const thumbCache = new Map<string, string>();
+
+function isImageNode(n: BPNode): boolean {
+  return n.type === "imageBlock";
+}
+
+/**
+ * The exact shape that gets written to storage: no base64, and none of the
+ * transient interaction flags React Flow hangs off a node (`selected`,
+ * `dragging`, `resizing`, measured `width`/`height`). Dropping those also means
+ * merely clicking a block no longer counts as an edit worth saving.
+ */
+export function serializeBlueprint(nodes: BPNode[], edges: BPEdge[]): { nodes: BPNode[]; edges: BPEdge[] } {
+  return {
+    nodes: nodes.map(n => {
+      let data = n.data;
+      if (isImageNode(n)) {
+        const d = n.data as ImageBlockData;
+        // Only safe to drop the data-url when the bytes are actually on disk.
+        if (d.filePath) data = { ...d, thumbUrl: "" };
+      }
+      const out: BPNode = { id: n.id, type: n.type, position: n.position, data };
+      if (n.style)  out.style  = n.style;
+      if (n.zIndex !== undefined) out.zIndex = n.zIndex;
+      return out;
+    }),
+    edges: edges.map(e => {
+      const out: BPEdge = { id: e.id, source: e.source, target: e.target };
+      if (e.sourceHandle) out.sourceHandle = e.sourceHandle;
+      if (e.targetHandle) out.targetHandle = e.targetHandle;
+      if (e.type)         out.type         = e.type;
+      if (e.markerEnd)    out.markerEnd    = e.markerEnd;
+      if (e.style)        out.style        = e.style;
+      return out;
+    }),
+  };
+}
+
+/**
+ * Rebuilds the displayable `thumbUrl` of every image node from disk, and
+ * rescues legacy nodes whose bytes only ever existed as base64 in localStorage
+ * by writing them out to disk now. Returns just the node data that changed, so
+ * the caller can merge it without clobbering blocks added while this ran.
+ */
+export async function hydrateBlueprintNodes(
+  projectId: string,
+  nodes: BPNode[]
+): Promise<Map<string, ImageBlockData>> {
+  const patches = new Map<string, ImageBlockData>();
+
+  await Promise.all(nodes.filter(isImageNode).map(async n => {
+    const d = n.data as ImageBlockData;
+
+    if (d.filePath && d.thumbUrl) { thumbCache.set(d.filePath, d.thumbUrl); return; }
+
+    // Normal case: bytes on disk, data-url dropped at save time — read it back.
+    if (d.filePath) {
+      const cached = thumbCache.get(d.filePath);
+      if (cached) { patches.set(n.id, { ...d, thumbUrl: cached }); return; }
+      try {
+        const bytes = await invoke<number[]>("read_attachment", { path: d.filePath });
+        const thumbUrl = bytesToDataUrl(bytes, d.name);
+        thumbCache.set(d.filePath, thumbUrl);
+        patches.set(n.id, { ...d, thumbUrl });
+      } catch (err) {
+        console.error("[Blueprint] read_attachment failed for", d.filePath, err);
+      }
+      return;
+    }
+
+    // Legacy case: base64 in storage, nothing on disk — move it to disk so it
+    // stops counting against the quota.
+    if (d.thumbUrl.startsWith("data:")) {
+      try {
+        const filePath = await invoke<string>("save_attachment", {
+          noteId: `blueprint_${projectId}`,
+          fileName: d.name,
+          data: dataUrlToBytes(d.thumbUrl),
+        });
+        thumbCache.set(filePath, d.thumbUrl);
+        patches.set(n.id, { ...d, filePath });
+      } catch (err) {
+        console.error("[Blueprint] could not migrate inline photo to disk:", err);
+      }
+    }
+  }));
+
+  return patches;
 }
 
 // Fit an image's natural size into a reasonable initial block size while
@@ -591,7 +717,8 @@ interface BlueprintProps {
   projectId: string;
   initialNodes: BPNode[];
   initialEdges: BPEdge[];
-  onChange: (nodes: BPNode[], edges: BPEdge[]) => void;
+  /** `immediate` skips the parent's own debounce — used when the canvas is going away. */
+  onChange: (nodes: BPNode[], edges: BPEdge[], immediate?: boolean) => void;
 }
 
 export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, initialEdges, onChange }) => {
@@ -656,17 +783,57 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Rebuild every photo's data-url from disk. Nodes are patched by id rather
+  // than wholesale so anything the user drops onto the canvas while this is in
+  // flight survives.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const patches = await hydrateBlueprintNodes(projectId, initialNodes);
+      if (cancelled || patches.size === 0) return;
+      setNodes(ns => ns.map(n => {
+        const patch = patches.get(n.id);
+        return patch ? { ...n, data: patch } : n;
+      }));
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const skipFirst   = useRef(true);
+  // Latest graph, readable from the unmount cleanup without re-subscribing it.
+  const latestRef     = useRef({ nodes: initialNodes, edges: initialEdges });
+  const lastSavedRef  = useRef<string | null>(null);
+
+  const commit = useCallback((immediate: boolean) => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const snap = serializeBlueprint(latestRef.current.nodes, latestRef.current.edges);
+    const serialized = JSON.stringify(snap);
+    // Selecting, dragging and rehydrating a photo all leave the persisted shape
+    // untouched — no point writing (and no point bumping the project's
+    // "updated" stamp) for those.
+    if (serialized === lastSavedRef.current) return;
+    lastSavedRef.current = serialized;
+    onChangeRef.current(snap.nodes, snap.edges, immediate);
+  }, []);
 
   useEffect(() => {
-    if (skipFirst.current) { skipFirst.current = false; return; }
+    latestRef.current = { nodes, edges };
+    if (lastSavedRef.current === null) {
+      // Baseline from what we were handed, so the first real edit registers.
+      lastSavedRef.current = JSON.stringify(serializeBlueprint(nodes, edges));
+      return;
+    }
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { onChangeRef.current(nodes, edges); }, 900);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [nodes, edges]);
+    saveTimer.current = setTimeout(() => commit(false), 700);
+  }, [nodes, edges, commit]);
+
+  // Switching to Structure mode, hitting "Назад" or changing sidebar tab
+  // unmounts this canvas. The pending debounce used to be cancelled here, which
+  // silently threw away up to a second of work — flush it through instead.
+  useEffect(() => () => commit(true), [commit]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges(eds => addEdge({
@@ -727,10 +894,15 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
             noteId: `blueprint_${projectId}`, fileName: file.name,
             data: Array.from(new Uint8Array(buf)),
           });
-        } catch {}
+        } catch (err) {
+          // Without a disk copy the photo has to ride along inside the project
+          // JSON, which is exactly what overruns the storage quota — so say so.
+          console.error("[Blueprint] save_attachment failed for", file.name, err);
+        }
 
         if (isImg) {
           const thumbUrl = String(ev.target?.result ?? "");
+          if (filePath) thumbCache.set(filePath, thumbUrl);
           const { width, height } = await loadImageSize(thumbUrl);
           setNodes(ns => [...ns, {
             id: nodeId, type: "imageBlock", position,

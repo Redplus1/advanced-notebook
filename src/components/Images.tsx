@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from "react"
 import { Plus, Trash2, Image as ImageIcon, X, Grid, ChevronLeft, Upload, Edit2, Check } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { useLang } from "../i18n";
+import { readJSON, writeJSON } from "../lib/storage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,17 +31,15 @@ interface Folder {
 const IMGS_KEY    = "an_images_v1";
 const FOLDERS_KEY = "an_img_folders_v1";
 
-function loadImages(): ImageItem[] { try { return JSON.parse(localStorage.getItem(IMGS_KEY) ?? "[]"); } catch { return []; } }
+function loadImages(): ImageItem[] { return readJSON<ImageItem[]>(IMGS_KEY, []); }
 // Persist METADATA ONLY. The image itself lives on disk (filePath). Stripping the heavy
 // base64 dataUrl is what prevents the localStorage quota overflow that silently dropped photos.
 function saveImages(i: ImageItem[]) {
-  try {
-    const slim = i.map(img => img.filePath ? { ...img, dataUrl: undefined } : img);
-    localStorage.setItem(IMGS_KEY, JSON.stringify(slim));
-  } catch {}
+  const slim = i.map(img => img.filePath ? { ...img, dataUrl: undefined } : img);
+  writeJSON(IMGS_KEY, slim);
 }
-function loadFolders(): Folder[] { try { return JSON.parse(localStorage.getItem(FOLDERS_KEY) ?? "[]"); } catch { return []; } }
-function saveFolders(f: Folder[]) { try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(f)); } catch {} }
+function loadFolders(): Folder[] { return readJSON<Folder[]>(FOLDERS_KEY, []); }
+function saveFolders(f: Folder[]) { writeJSON(FOLDERS_KEY, f); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 // ─── Disk <-> data-url helpers ──────────────────────────────────────────────────

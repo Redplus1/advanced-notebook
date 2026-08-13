@@ -6,10 +6,11 @@ import React, {
 } from "react";
 import {
   Plus, Trash2, ChevronLeft, GripVertical, Edit2,
-  Check, X, Film, AlignLeft, Loader2, GitBranch,
+  Check, X, Film, AlignLeft, Loader2, GitBranch, AlertTriangle,
 } from "lucide-react";
-import { Blueprint, type BPNode, type BPEdge } from "./Blueprint";
+import { Blueprint, serializeBlueprint, type BPNode, type BPEdge } from "./Blueprint";
 import { t, useLang } from "../i18n";
+import { readJSON, writeJSON, writeString } from "../lib/storage";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,20 +44,33 @@ interface Project {
 const KEY = "an_projects_v3";
 
 function load(): Project[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    // Migrate older records
-    return (arr as Project[]).map((p) => ({
-      ...p,
-      blueprint: p.blueprint ?? { nodes: [], edges: [] },
-    }));
-  } catch { return []; }
+  const arr = readJSON<Project[]>(KEY, []);
+  if (!Array.isArray(arr)) return [];
+  // Migrate older records
+  return arr.map((p) => ({
+    ...p,
+    sections:  p.sections ?? [],
+    blueprint: {
+      nodes: p.blueprint?.nodes ?? [],
+      edges: p.blueprint?.edges ?? [],
+    },
+  }));
 }
 
-function persist(projects: Project[]) {
-  try { localStorage.setItem(KEY, JSON.stringify(projects)); }
-  catch (e) { console.error("persist error:", e); }
+/**
+ * Blueprint photos are stripped to their on-disk path before the project list
+ * is written. Keeping the base64 here is what used to push `an_projects_v3`
+ * past the localStorage quota after the very first picture, at which point
+ * every subsequent write threw and only the last successful snapshot survived.
+ * Returns false when the write did not land, so the UI can stop claiming
+ * "Сохранено".
+ */
+function persist(projects: Project[]): boolean {
+  const slim = projects.map((p) => ({
+    ...p,
+    blueprint: serializeBlueprint(p.blueprint.nodes, p.blueprint.edges),
+  }));
+  return writeJSON(KEY, slim);
 }
 
 // The Projects tab unmounts when you switch to another sidebar tab (Notes,
@@ -67,7 +81,7 @@ function loadMode(): ViewMode {
   return localStorage.getItem(MODE_KEY) === "blueprint" ? "blueprint" : "structure";
 }
 function persistMode(m: ViewMode) {
-  try { localStorage.setItem(MODE_KEY, m); } catch {}
+  writeString(MODE_KEY, m);
 }
 
 function uid() {
@@ -104,7 +118,7 @@ function relDate(ts: number): string {
 
 // ─── Save badge ────────────────────────────────────────────────────────────────
 
-type SaveState = "idle" | "saving" | "saved";
+type SaveState = "idle" | "saving" | "saved" | "error";
 const SaveBadge: React.FC<{ state: SaveState }> = ({ state }) => {
   if (state === "saving") return (
     <span className="flex items-center gap-1.5 text-[11px] font-mono select-none" style={{ color: "var(--c-text-4)" }}>
@@ -114,6 +128,14 @@ const SaveBadge: React.FC<{ state: SaveState }> = ({ state }) => {
   if (state === "saved") return (
     <span className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-600/70 select-none">
       <Check size={10} strokeWidth={3} />{t("saved")}
+    </span>
+  );
+  // A failed write used to be invisible — the badge still said "Сохранено"
+  // while nothing was reaching disk.
+  if (state === "error") return (
+    <span className="flex items-center gap-1.5 text-[11px] font-mono select-none" style={{ color: "#f43f5e" }}
+      title={t("save_failed_hint")}>
+      <AlertTriangle size={10} strokeWidth={2.5} />{t("save_failed")}
     </span>
   );
   return null;
@@ -491,33 +513,62 @@ export const Projects: React.FC = () => {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const open      = projects.find((p) => p.id === openId) ?? null;
 
-  // ── Debounced persist ──
-  const scheduleSave = useCallback((updated: Project[]) => {
-    setSaveState("idle");
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      setSaveState("saving");
-      persist(updated);
-      setTimeout(() => {
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 2000);
-      }, 250);
-    }, 600);
+  // Mirror of `projects` that is readable synchronously. Mutations used to
+  // compute the next list *inside* a setState updater and persist from there —
+  // a side effect in what must be a pure function, and impossible to flush on
+  // demand. With the mirror the next list exists before React is told about it,
+  // so it can be written to disk immediately when needed.
+  const projectsRef = useRef(projects);
+  // Holds a list that has been changed but not yet written, so unmount and
+  // window-close handlers know whether there is anything to flush.
+  const pendingRef  = useRef<Project[] | null>(null);
+
+  const flushSave = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const toSave = pendingRef.current;
+    if (!toSave) return;
+    pendingRef.current = null;
+    const ok = persist(toSave);
+    setSaveState(ok ? "saving" : "error");
+    if (!ok) return;
+    setTimeout(() => {
+      setSaveState("saved");
+      setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 2000);
+    }, 250);
   }, []);
 
-  const mutate = useCallback((fn: (prev: Project[]) => Project[]) => {
-    setProjects((prev) => {
-      const next = fn(prev);
-      scheduleSave(next);
-      return next;
-    });
-  }, [scheduleSave]);
+  const applyProjects = useCallback((next: Project[], immediate = false) => {
+    projectsRef.current = next;
+    pendingRef.current  = next;
+    setProjects(next);
+    if (immediate) { flushSave(); return; }
+    setSaveState((s) => (s === "error" ? s : "idle"));
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushSave, 600);
+  }, [flushSave]);
 
-  const touch = useCallback((id: string, changes: Partial<Project>) => {
+  const mutate = useCallback((fn: (prev: Project[]) => Project[], immediate = false) => {
+    applyProjects(fn(projectsRef.current), immediate);
+  }, [applyProjects]);
+
+  const touch = useCallback((id: string, changes: Partial<Project>, immediate = false) => {
     mutate((prev) =>
-      prev.map((p) => p.id === id ? { ...p, ...changes, updatedAt: Date.now() } : p)
+      prev.map((p) => p.id === id ? { ...p, ...changes, updatedAt: Date.now() } : p),
+      immediate
     );
   }, [mutate]);
+
+  // Leaving the tab unmounts this component and closing the window kills the
+  // page outright; either one inside the 600 ms debounce window used to lose
+  // the edit. Both now write through first.
+  useEffect(() => {
+    const onBeforeUnload = () => flushSave();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      flushSave();
+    };
+  }, [flushSave]);
 
   // Opens a project straight into whichever view (structure/blueprint) is
   // currently picked — the same `mode` switcher shown both in the projects
@@ -534,29 +585,24 @@ export const Projects: React.FC = () => {
       blueprint: { nodes: [], edges: [] },
       createdAt: Date.now(), updatedAt: Date.now(),
     };
-    const next = [p, ...projects];
-    setProjects(next);
-    persist(next);
+    applyProjects([p, ...projectsRef.current], true);
     setOpenId(p.id);
     setMode("structure");
-    setSaveState("idle");
   };
 
   const deleteProject = (id: string) => {
-    const next = projects.filter((p) => p.id !== id);
-    setProjects(next);
-    persist(next);
+    applyProjects(projectsRef.current.filter((p) => p.id !== id), true);
     if (openId === id) setOpenId(null);
   };
 
   // ── Section CRUD ──
   const addSection = (projectId: string) =>
-    touch(projectId, {
-      sections: [
-        ...(projects.find((p) => p.id === projectId)?.sections ?? []),
-        { id: uid(), title: t("add_section"), items: [] },
-      ],
-    });
+    mutate((prev) =>
+      prev.map((p) => p.id !== projectId ? p : {
+        ...p, updatedAt: Date.now(),
+        sections: [...p.sections, { id: uid(), title: t("add_section"), items: [] }],
+      })
+    );
 
   const updateSection = (projectId: string, sectionId: string, changes: Partial<Section>) =>
     mutate((prev) =>
@@ -620,9 +666,11 @@ export const Projects: React.FC = () => {
     );
 
   // ── Blueprint save ──
-  const saveBlueprintData = useCallback((nodes: BPNode[], edges: BPEdge[]) => {
+  // `immediate` arrives when the canvas is unmounting (mode switch, "Назад",
+  // tab change) and its pending edit would otherwise die with it.
+  const saveBlueprintData = useCallback((nodes: BPNode[], edges: BPEdge[], immediate = false) => {
     if (!openId) return;
-    touch(openId, { blueprint: { nodes, edges } });
+    touch(openId, { blueprint: { nodes, edges } }, immediate);
   }, [openId, touch]);
 
   // ══════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar, Trash2, RotateCcw } from "lucide-react";
-import { t, useLang } from "../i18n";
+import { useLang } from "../i18n";
+import { readJSON, writeJSON } from "../lib/storage";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,18 +22,24 @@ interface DayData {
 
 const KEY = "an_tasks_v1";
 function load(): Record<string, DayData> {
-  try { const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : {}; }
-  catch { return {}; }
+  return readJSON<Record<string, DayData>>(KEY, {});
 }
 function save(d: Record<string, DayData>) {
-  try { localStorage.setItem(KEY, JSON.stringify(d)); } catch {}
+  writeJSON(KEY, d);
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
+// Local calendar date, not UTC. `toISOString()` shifts to UTC first, so east of
+// Greenwich every task added between midnight and the UTC offset was filed
+// under the previous day — and "Сегодня" pointed at a row the user wasn't
+// looking at.
 function toDateStr(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
 }
 function today() { return toDateStr(new Date()); }
 
@@ -49,11 +56,6 @@ function formatDate(dateStr: string): string {
   if (dateStr === todayStr) return "Сегодня";
   if (dateStr === yesterdayStr) return "Вчера";
   return d.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
-}
-
-function formatDateShort(dateStr: string): string {
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
 function getWeekDays(anchor: string): string[] {
@@ -240,7 +242,10 @@ const DayView: React.FC<{
   const tasks = data?.tasks ?? [];
   const done = tasks.filter(t2 => t2.done).length;
 
-  const mutate = (newTasks: Task[]) => onUpdate({ date: dateStr, tasks: newTasks });
+  // Spread the existing day first: rebuilding the record from scratch dropped
+  // every other field on it, so adding or ticking a task silently cleared the
+  // day's "Важный день" flag.
+  const mutate = (newTasks: Task[]) => onUpdate({ ...data, date: dateStr, tasks: newTasks });
 
   const addTask = (text: string) => {
     mutate([...tasks, { id: uid(), text, done: false, createdAt: Date.now() }]);

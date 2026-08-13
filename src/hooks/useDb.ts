@@ -9,6 +9,8 @@
  * In browser / dev mode falls back to localStorage automatically.
  */
 
+import { readJSON, writeJSON, writeString } from "../lib/storage";
+
 // ─── Tauri detection ───────────────────────────────────────────────────────────
 
 function isTauri(): boolean {
@@ -87,11 +89,10 @@ async function _initSchema(db: any) {
 // ─── localStorage helpers ──────────────────────────────────────────────────────
 
 function lsGet<T>(key: string, def: T): T {
-  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : def; }
-  catch { return def; }
+  return readJSON<T>(key, def);
 }
 function lsSet(key: string, val: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  writeJSON(key, val);
 }
 
 // ─── Notes CRUD ───────────────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ export async function dbSetSetting(key: string, value: string): Promise<void> {
     );
     return;
   }
-  localStorage.setItem(`vss_setting_${key}`, value);
+  writeString(`vss_setting_${key}`, value);
 }
 
 // ─── Autosave hook ────────────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import { Plus, Trash2, FolderOpen, File, FileText, Film, Music, Archive, Image as ImageIcon,
-         ChevronLeft, Upload, Edit2, Check, X, Download, Search, Grid, List } from "lucide-react";
+         ChevronLeft, Upload, Edit2, Check, X, Search, Grid, List } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { useLang } from "../i18n";
+import { readJSON, writeJSON } from "../lib/storage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,10 +29,10 @@ interface Folder {
 const FILES_KEY   = "an_files_v1";
 const FOLDERS_KEY = "an_file_folders_v1";
 
-function loadFiles(): FileItem[] { try { return JSON.parse(localStorage.getItem(FILES_KEY) ?? "[]"); } catch { return []; } }
-function saveFiles(f: FileItem[]) { try { localStorage.setItem(FILES_KEY, JSON.stringify(f)); } catch {} }
-function loadFolders(): Folder[] { try { return JSON.parse(localStorage.getItem(FOLDERS_KEY) ?? "[]"); } catch { return []; } }
-function saveFolders(f: Folder[]) { try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(f)); } catch {} }
+function loadFiles(): FileItem[] { return readJSON<FileItem[]>(FILES_KEY, []); }
+function saveFiles(f: FileItem[]) { writeJSON(FILES_KEY, f); }
+function loadFolders(): Folder[] { return readJSON<Folder[]>(FOLDERS_KEY, []); }
+function saveFolders(f: Folder[]) { writeJSON(FOLDERS_KEY, f); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 function fmtSize(b: number): string {
   if (b < 1024) return b + " B";

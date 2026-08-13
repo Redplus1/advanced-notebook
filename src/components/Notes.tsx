@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
-import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon } from "lucide-react";
+import { Plus, Trash2, Search, X, FileText, Hash, Check, Loader2, Highlighter, Type, Paperclip, Image as ImageIcon, AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { t, useLang } from "../i18n";
+import { readJSON, writeJSON } from "../lib/storage";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -17,18 +18,16 @@ const HL_KEY      = "an_highlights_v1";
 const FMT_KEY     = "an_formats_v1";
 
 interface Attachment { id: string; noteId: string; name: string; filePath: string; thumbUrl: string; x: number; y: number; w: number; }
-function loadAttachments(): Record<string, Attachment[]> { try { return JSON.parse(localStorage.getItem(ATTACH_KEY) ?? "{}"); } catch { return {}; } }
+function loadAttachments(): Record<string, Attachment[]> { return readJSON<Record<string, Attachment[]>>(ATTACH_KEY, {}); }
 // Persist METADATA ONLY. For disk-backed attachments the heavy base64 thumbUrl is dropped
 // (it is regenerated from disk via read_attachment on next launch) — this is what keeps
 // localStorage under quota so note attachments are never silently lost.
 function saveAttachments(a: Record<string, Attachment[]>) {
-  try {
-    const slim: Record<string, Attachment[]> = {};
-    for (const k of Object.keys(a)) {
-      slim[k] = a[k].map(att => att.filePath ? { ...att, thumbUrl: "" } : att);
-    }
-    localStorage.setItem(ATTACH_KEY, JSON.stringify(slim));
-  } catch {}
+  const slim: Record<string, Attachment[]> = {};
+  for (const k of Object.keys(a)) {
+    slim[k] = a[k].map(att => att.filePath ? { ...att, thumbUrl: "" } : att);
+  }
+  writeJSON(ATTACH_KEY, slim);
 }
 function bytesToDataUrl(bytes: number[], mimeType = "image/jpeg"): string {
   const arr = new Uint8Array(bytes); let binary = "";
@@ -44,12 +43,12 @@ function bytesToUrl(bytes: number[], name = ""): string {
   }
   return "";
 }
-function loadNotes(): Note[] { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : []; } catch { return []; } }
-function saveNotes(n: Note[]) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(n)); } catch {} }
-function loadHL(): Record<string, HighlightRange[]> { try { const r = localStorage.getItem(HL_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; } }
-function saveHL(h: Record<string, HighlightRange[]>) { try { localStorage.setItem(HL_KEY, JSON.stringify(h)); } catch {} }
-function loadFmt(): Record<string, FormatRange[]> { try { const r = localStorage.getItem(FMT_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; } }
-function saveFmt(f: Record<string, FormatRange[]>) { try { localStorage.setItem(FMT_KEY, JSON.stringify(f)); } catch {} }
+function loadNotes(): Note[] { return readJSON<Note[]>(STORAGE_KEY, []); }
+function saveNotes(n: Note[]): boolean { return writeJSON(STORAGE_KEY, n); }
+function loadHL(): Record<string, HighlightRange[]> { return readJSON<Record<string, HighlightRange[]>>(HL_KEY, {}); }
+function saveHL(h: Record<string, HighlightRange[]>) { writeJSON(HL_KEY, h); }
+function loadFmt(): Record<string, FormatRange[]> { return readJSON<Record<string, FormatRange[]>>(FMT_KEY, {}); }
+function saveFmt(f: Record<string, FormatRange[]>) { writeJSON(FMT_KEY, f); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 // Stable empty arrays — noteHL/noteFmt memos stay stable when no data
@@ -120,8 +119,9 @@ function renderWithFormats(text: string, hls: HighlightRange[], fmts: FormatRang
 
 // ─── SaveBadge ─────────────────────────────────────────────────────────────────
 
-const SaveBadge: React.FC<{ dirty: boolean; saving: boolean }> = ({ dirty, saving }) => {
+const SaveBadge: React.FC<{ dirty: boolean; saving: boolean; failed: boolean }> = ({ dirty, saving, failed }) => {
   const style: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4, fontSize: 10, fontFamily: "monospace", userSelect: "none", whiteSpace: "nowrap", width: 60 };
+  if (failed) return <span style={{ ...style, color: "#f43f5e" }} title={t("save_failed_hint")}><AlertTriangle size={9} strokeWidth={2.5} />{t("save_failed")}</span>;
   if (saving) return <span style={{ ...style, color: "var(--c-text-4)" }}><Loader2 size={9} className="animate-spin" />{t("saving")}</span>;
   if (!dirty) return <span style={{ ...style, color: "var(--c-accent)" }}><Check size={9} strokeWidth={3} />{t("saved")}</span>;
   return <span style={{ ...style }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} /></span>;
@@ -275,6 +275,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
   const [search, setSearch]     = useState("");
   const [dirty, setDirty]       = useState(false);
   const [saving, setSaving]     = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [highlights, setHL]     = useState<Record<string, HighlightRange[]>>(() => loadHL());
   const [formats, setFmt]       = useState<Record<string, FormatRange[]>>(() => loadFmt());
   const [activeColor, setColor] = useState<HColor>("yellow");
@@ -317,11 +318,47 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
   const wc = selected ? { words: selected.content.trim() ? selected.content.trim().split(/\s+/).length : 0, chars: selected.content.length } : null;
   const hasSel = sel.start < sel.end;
 
-  const scheduleSave = useCallback((updated: Note[]) => {
+  // Synchronous mirror of `notes` so writes never have to happen inside a
+  // setState updater, and so a pending edit can be flushed on demand.
+  const notesRef   = useRef(notes);
+  const pendingRef = useRef<Note[] | null>(null);
+
+  const flushNotes = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const toSave = pendingRef.current;
+    if (!toSave) return;
+    pendingRef.current = null;
+    setSaving(true);
+    const ok = saveNotes(toSave);
+    setSaveFailed(!ok);
+    if (!ok) { setSaving(false); return; }
+    setTimeout(() => { setSaving(false); setDirty(false); }, 300);
+  }, []);
+
+  /**
+   * The single write path. `immediate` is for structural edits (create/delete)
+   * that must not sit behind the debounce — otherwise a queued keystroke save
+   * from the previous note would land afterwards and resurrect the row that
+   * was just deleted.
+   */
+  const applyNotes = useCallback((next: Note[], immediate = false) => {
+    notesRef.current   = next;
+    pendingRef.current = next;
+    setNotes(next);
+    if (immediate) { flushNotes(); return; }
     setDirty(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { setSaving(true); saveNotes(updated); setTimeout(() => { setSaving(false); setDirty(false); }, 300); }, 900);
-  }, []);
+    saveTimer.current = setTimeout(flushNotes, 900);
+  }, [flushNotes]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => flushNotes();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      flushNotes();
+    };
+  }, [flushNotes]);
 
   // Auto-resize textarea height (skip when textarea is absolute-positioned = overlay mode)
   const resize = () => {
@@ -334,16 +371,15 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
 
   const updateField = (field: keyof Note, value: string) => {
     if (!selectedId) return;
-    const updated = notes.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n);
-    setNotes(updated); scheduleSave(updated);
+    applyNotes(notesRef.current.map(n => n.id === selectedId ? { ...n, [field]: value, updatedAt: Date.now() } : n));
   };
 
   const createNote = useCallback(() => {
     const note: Note = { id: uid(), title: "", content: "", tags: "", createdAt: Date.now(), updatedAt: Date.now() };
-    setNotes(prev => { const next = [note, ...prev]; saveNotes(next); return next; });
-    setSelId(note.id); setDirty(false); setMode("write");
+    applyNotes([note, ...notesRef.current], true);
+    setSelId(note.id); setMode("write");
     setTimeout(() => titleRef.current?.focus(), 40);
-  }, []);
+  }, [applyNotes]);
 
   // Stable callbacks for NotesSidebarPanel memo — functional updates, no deps needed
   const handleSelectNote = useCallback((id: string) => {
@@ -351,9 +387,9 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
   }, []);
 
   const handleDeleteNote = useCallback((id: string) => {
-    setNotes(prev => { const next = prev.filter(n => n.id !== id); saveNotes(next); return next; });
+    applyNotes(notesRef.current.filter(n => n.id !== id), true);
     setSelId(prev => prev === id ? null : prev);
-  }, []);
+  }, [applyNotes]);
 
   // Keyboard shortcuts — attached once, isActiveRef guards inactive tab
   useEffect(() => {
@@ -496,7 +532,9 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
 
   useEffect(() => {
     const onVoiceNote = () => {
-      const updated = loadNotes(); setNotes(updated);
+      const updated = loadNotes();
+      notesRef.current = updated;
+      setNotes(updated);
       if (updated.length > 0 && !selectedId) setSelId(updated[0].id);
     };
     window.addEventListener("an-notes-updated", onVoiceNote);
@@ -594,7 +632,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
                   </button>
                 ))}
               </div>
-              <SaveBadge dirty={dirty} saving={saving} />
+              <SaveBadge dirty={dirty} saving={saving} failed={saveFailed} />
               <input ref={attachInputRef} type="file" multiple className="hidden" onChange={e => addAttachment(selected.id, e.target.files)} />
               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e => addAttachment(selected.id, e.target.files)} />
               <div style={{ position: "relative" }}>

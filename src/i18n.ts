@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { writeString } from "./lib/storage";
 
 export type Lang = "en" | "ru";
 export const LANG_KEY = "an_lang";
@@ -11,7 +12,7 @@ export const getLang = (): Lang => _lang;
 
 export const changeLang = (lang: Lang): void => {
   _lang = lang;
-  localStorage.setItem(LANG_KEY, lang);
+  writeString(LANG_KEY, lang);
   _listeners.forEach((fn) => fn());
 };
 
@@ -56,6 +57,8 @@ const T = {
     delete: "Delete",
     saving: "Saving…",
     saved: "Saved",
+    save_failed: "Not saved",
+    save_failed_hint: "Local storage is full or unavailable — the last change did not reach disk. Details in the console.",
     no_results: "Nothing found",
     untitled: "Untitled",
     shortcut_hint: "⌘N  new note",
@@ -173,6 +176,8 @@ const T = {
     delete: "Удалить",
     saving: "Сохранение…",
     saved: "Сохранено",
+    save_failed: "Не сохранено",
+    save_failed_hint: "Локальное хранилище переполнено или недоступно — последнее изменение не записано. Подробности в консоли.",
     no_results: "Ничего не найдено",
     untitled: "Без названия",
     shortcut_hint: "⌘N  новая заметка",
