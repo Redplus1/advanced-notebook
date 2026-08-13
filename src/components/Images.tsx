@@ -129,6 +129,7 @@ export const Images: React.FC = () => {
             const filePath = await invoke<string>("save_attachment", {
               noteId: "images_" + (img.folderId || "root"),
               fileName: img.name,
+              subDir: img.id,
               data: dataUrlToBytes(img.dataUrl),
             });
             changed = true;
@@ -170,6 +171,8 @@ export const Images: React.FC = () => {
 
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/")) return;
+      // Generated up front so it can name the photo's own folder on disk.
+      const itemId = uid();
       const reader = new FileReader();
       reader.onload = async e => {
         const dataUrl = e.target?.result as string;
@@ -181,6 +184,9 @@ export const Images: React.FC = () => {
           filePath = await invoke<string>("save_attachment", {
             noteId: "images_" + (targetFolder || "root"),
             fileName: file.name,
+            // Own folder per photo: two different pictures with the same
+            // filename used to overwrite each other in the same gallery folder.
+            subDir: itemId,
             data: Array.from(new Uint8Array(buf)),
           });
         } catch (err) { console.error("[Images] save_attachment failed:", err); }
@@ -189,7 +195,7 @@ export const Images: React.FC = () => {
         const img = new window.Image();
         img.onload = () => {
           const item: ImageItem = {
-            id: uid(), name: file.name, filePath, dataUrl,
+            id: itemId, name: file.name, filePath, dataUrl,
             folderId: targetFolder,
             createdAt: Date.now(),
             width: img.width, height: img.height,

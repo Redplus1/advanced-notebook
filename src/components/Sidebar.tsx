@@ -61,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = memo(({ activeTab, onTabChange })
       </nav>
       <div className="px-4 py-3 border-t no-drag flex-shrink-0" style={{ borderColor: "var(--c-border-sub)" }}>
         <div className="flex items-center justify-between">
-          <div className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>v1.6.3</div>
+          <div className="text-[10px] font-mono" style={{ color: "var(--c-text-4)" }}>v1.6.4</div>
         </div>
       </div>
     </aside>

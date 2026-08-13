@@ -210,6 +210,7 @@ export async function hydrateBlueprintNodes(
         const filePath = await invoke<string>("save_attachment", {
           noteId: `blueprint_${projectId}`,
           fileName: d.name,
+          subDir: n.id,
           data: dataUrlToBytes(d.thumbUrl),
         });
         thumbCache.set(filePath, d.thumbUrl);
@@ -932,6 +933,9 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
           const buf = await file.arrayBuffer();
           filePath = await invoke<string>("save_attachment", {
             noteId: `blueprint_${projectId}`, fileName: file.name,
+            // Own folder per block, so two different pictures sharing a
+            // filename cannot overwrite one another.
+            subDir: nodeId,
             data: Array.from(new Uint8Array(buf)),
           });
         } catch (err) {

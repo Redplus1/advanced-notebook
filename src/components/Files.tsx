@@ -185,15 +185,20 @@ export const Files: React.FC = () => {
     const folderId = activeFolder ?? "";
     for (const file of Array.from(fileList)) {
       try {
+        // Generated up front so it can name the file's own folder on disk.
+        const itemId = uid();
         const buf   = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buf));
         const filePath = await invoke<string>("save_attachment", {
           noteId: "files_" + (folderId || "root"),
           fileName: file.name,
+          // Own folder per upload, so two different files with the same name
+          // do not overwrite one another.
+          subDir: itemId,
           data: bytes,
         });
         const item: FileItem = {
-          id: uid(), name: file.name, filePath,
+          id: itemId, name: file.name, filePath,
           size: file.size, folderId,
           createdAt: Date.now(),
           ext: fileExt(file.name),

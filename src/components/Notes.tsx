@@ -550,7 +550,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
         reader.onload = async (ev) => {
           const thumbUrl = ev.target?.result as string ?? "";
           let filePath = "";
-          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) }); } catch {}
+          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, subDir: id, data: Array.from(new Uint8Array(buf)) }); } catch {}
           const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl, x: 20, y: 20, w: 240 };
           setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
         };
@@ -558,7 +558,7 @@ export const Notes: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => 
       } else {
         (async () => {
           let filePath = "";
-          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, data: Array.from(new Uint8Array(buf)) }); } catch {}
+          try { const { invoke } = await import("@tauri-apps/api/tauri"); const buf = await file.arrayBuffer(); filePath = await invoke<string>("save_attachment", { noteId, fileName: file.name, subDir: id, data: Array.from(new Uint8Array(buf)) }); } catch {}
           const a: Attachment = { id, noteId, name: file.name, filePath, thumbUrl: "", x: 20, y: 20, w: 240 };
           setAttach(prev => { const next = { ...prev, [noteId]: [...(prev[noteId]??[]), a] }; saveAttachments(next); return next; });
         })();
