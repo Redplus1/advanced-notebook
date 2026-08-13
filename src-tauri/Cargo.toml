@@ -1,6 +1,6 @@
 [package]
 name = "advanced-notebook"
-version = "1.6.2"
+version = "1.6.3"
 description = "Advanced Notebook"
 authors = []
 license = "MIT"

@@ -854,10 +854,50 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
     }]);
   }, [setNodes]);
 
+  // Removing a photo/file block must also remove its bytes from
+  // AppData/attachments — otherwise every deleted picture stays on disk
+  // forever as an orphan the user has no way to see or clean up.
+  //
+  // A path is only deleted once no block still points at it. Two blocks can
+  // legitimately share one file: `save_attachment` names the file after the
+  // original filename, so adding the same picture twice to one blueprint
+  // yields the same path, and deleting one of the two must not pull the file
+  // out from under the other.
+  const removeNodeFiles = useCallback((removed: BPNode[], remaining: BPNode[]) => {
+    const pathOf = (n: BPNode) => (n.data as { filePath?: string }).filePath;
+    const stillReferenced = new Set(remaining.map(pathOf).filter(Boolean));
+
+    const orphaned = new Set<string>();
+    for (const n of removed) {
+      const p = pathOf(n);
+      if (p && !stillReferenced.has(p)) orphaned.add(p);
+    }
+
+    orphaned.forEach(path => {
+      thumbCache.delete(path);
+      invoke("delete_attachment", { path }).catch(err => {
+        // A file that is already gone is not worth bothering the user about.
+        console.error("[Blueprint] delete_attachment failed for", path, err);
+      });
+    });
+  }, []);
+
   const deleteSelected = useCallback(() => {
-    setNodes(ns => ns.filter(n => !n.selected));
+    const current   = latestRef.current.nodes;
+    const removed   = current.filter(n => n.selected);
+    if (removed.length === 0) { setEdges(es => es.filter(e => !e.selected)); return; }
+    const remaining = current.filter(n => !n.selected);
+    removeNodeFiles(removed, remaining);
+    setNodes(remaining);
     setEdges(es => es.filter(e => !e.selected));
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, removeNodeFiles]);
+
+  // Delete/Backspace removes nodes inside React Flow itself, which never goes
+  // through `deleteSelected` — this is the same cleanup for that route.
+  const onNodesDelete = useCallback((deleted: BPNode[]) => {
+    const deletedIds = new Set(deleted.map(n => n.id));
+    removeNodeFiles(deleted, latestRef.current.nodes.filter(n => !deletedIds.has(n.id)));
+  }, [removeNodeFiles]);
 
   // Layering: node.zIndex (not style.zIndex) is what React Flow actually
   // uses for stacking order, so bumping the selected node's zIndex above
@@ -1030,6 +1070,7 @@ export const Blueprint: React.FC<BlueprintProps> = ({ projectId, initialNodes, i
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+        onNodesDelete={onNodesDelete}
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
