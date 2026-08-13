@@ -160,8 +160,13 @@ export const Images: React.FC = () => {
   // ── File upload ──────────────────────────────────────────────────────────────
 
   const handleFiles = useCallback((files: FileList | null) => {
-    if (!files) return;
-    const targetFolder = activeFolder ?? (folders[0]?.id ?? "");
+    if (!files || files.length === 0) return;
+    // Same rule as the Files tab: an upload belongs to the folder you are
+    // actually looking at, and to no folder at all when you are in "Все фото".
+    // Falling back to `folders[0]` filed the photo into the first folder
+    // instead, so it showed up both under "Все фото" and inside a folder the
+    // user never opened — which reads as the gallery duplicating the photo.
+    const targetFolder = activeFolder ?? "";
 
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/")) return;
@@ -195,12 +200,23 @@ export const Images: React.FC = () => {
       };
       reader.readAsDataURL(file);
     });
-  }, [activeFolder, folders]);
+  }, [activeFolder]);
 
+  // A drag only counts as an import when it carries real files from outside the
+  // app. Dragging a photo around inside the gallery also lands here, and
+  // Chromium hands the dragged <img> over as a file — so the gallery re-imported
+  // the picture the user was merely moving, and a duplicate appeared. Photos are
+  // no longer draggable (see the grid below), and this is the second guard.
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragging(false);
+    if (!e.dataTransfer.types.includes("Files")) return;
     handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) setDragging(true);
+  }, []);
 
   // ── Folder ops ───────────────────────────────────────────────────────────────
 
@@ -238,10 +254,18 @@ export const Images: React.FC = () => {
 
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
+      onDragOver={onDragOver}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
+      {/* One shared picker for both upload buttons. There used to be two inputs
+          carrying the same ref, so the ref only ever pointed at the last one.
+          Clearing the value afterwards lets the same file be picked twice in a
+          row — otherwise onChange never fires the second time. */}
+      <input
+        ref={inputRef} type="file" multiple accept="image/*" className="hidden"
+        onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
+      />
       {/* ── Sidebar ── */}
       <aside className="flex flex-col h-full border-r flex-shrink-0" style={{ width: 220, background: "var(--c-surface)", borderColor: "var(--c-border-sub)" }}>
         <div className="flex items-center justify-between px-4 py-3.5 border-b" style={{ borderColor: "var(--c-border-sub)" }}>
@@ -309,8 +333,6 @@ export const Images: React.FC = () => {
 
         {/* Upload button */}
         <div className="p-3 border-t" style={{ borderColor: "var(--c-border-sub)" }}>
-          <input ref={inputRef} type="file" multiple accept="image/*" className="hidden"
-            onChange={e => handleFiles(e.target.files)} />
           <button onClick={() => inputRef.current?.click()}
             className="flex items-center justify-center gap-2 w-full py-2 rounded-2xl text-[12px] font-500 transition-all active:scale-95"
             style={{ background: "var(--c-accent)", color: "#fff" }}>
@@ -336,8 +358,6 @@ export const Images: React.FC = () => {
             {activeImages.length} фото
           </span>
           <div className="ml-auto">
-            <input ref={inputRef} type="file" multiple accept="image/*" className="hidden"
-              onChange={e => handleFiles(e.target.files)} />
             <button onClick={() => inputRef.current?.click()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-500 transition-all active:scale-95"
               style={{ background: "var(--c-accent)", color: "#fff" }}>
@@ -373,6 +393,8 @@ export const Images: React.FC = () => {
                   onClick={() => img.dataUrl && setLightbox(img)}>
                   {img.dataUrl ? (
                     <img src={img.dataUrl} alt=""
+                      draggable={false}
+                      onDragStart={e => e.preventDefault()}
                       className="w-full block transition-transform duration-300 group-hover:scale-105"
                       style={{ display: "block" }} />
                   ) : (
@@ -414,6 +436,8 @@ export const Images: React.FC = () => {
             <X size={20} />
           </button>
           <img src={lightbox.dataUrl} alt={lightbox.name}
+            draggable={false}
+            onDragStart={e => e.preventDefault()}
             onClick={e => e.stopPropagation()}
             style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 12 }} />
           <p className="absolute bottom-4 text-[12px]" style={{ color: "rgba(255,255,255,0.5)" }}>

@@ -203,10 +203,17 @@ export const Files: React.FC = () => {
     }
   }, [activeFolder]);
 
+  // Only real files dragged in from outside count as an import.
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragging(false);
+    if (!e.dataTransfer.types.includes("Files")) return;
     handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) setDragging(true);
+  }, []);
 
   // ── Folders ───────────────────────────────────────────────────────────────────
 
@@ -238,10 +245,17 @@ export const Files: React.FC = () => {
 
   return (
     <div className="flex h-full" style={{ background: "var(--c-bg)" }}
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
+      onDragOver={onDragOver}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
+      {/* One shared picker for both upload buttons — there used to be two
+          inputs carrying the same ref. Clearing the value afterwards lets the
+          same file be picked twice in a row. */}
+      <input
+        ref={inputRef} type="file" multiple className="hidden"
+        onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
+      />
       {/* ── Sidebar ── */}
       <aside className="flex flex-col h-full border-r flex-shrink-0"
         style={{ width: 220, background: "var(--c-surface)", borderColor: "var(--c-border-sub)" }}>
@@ -326,8 +340,6 @@ export const Files: React.FC = () => {
 
         {/* Upload button */}
         <div className="p-3 border-t" style={{ borderColor: "var(--c-border-sub)" }}>
-          <input ref={inputRef} type="file" multiple className="hidden"
-            onChange={e => handleFiles(e.target.files)} />
           <button onClick={() => inputRef.current?.click()}
             className="flex items-center justify-center gap-2 w-full py-2 rounded-2xl text-[12px] font-500 transition-all active:scale-95"
             style={{ background: "var(--c-accent)", color: "#fff" }}>
@@ -383,8 +395,6 @@ export const Files: React.FC = () => {
             ))}
           </div>
 
-          <input ref={inputRef} type="file" multiple className="hidden"
-            onChange={e => handleFiles(e.target.files)} />
           <button onClick={() => inputRef.current?.click()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-500 transition-all active:scale-95"
             style={{ background: "var(--c-accent)", color: "#fff" }}>

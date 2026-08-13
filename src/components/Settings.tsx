@@ -273,7 +273,7 @@ export const SettingsTab: React.FC = () => {
           <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--c-border)", background: "var(--c-surface)" }}>
             {[
               ["App", "Advanced Notebook"],
-              ["Version", "1.6.1"],
+              ["Version", "1.6.2"],
               ["Stack", "Tauri · React · TypeScript · SQLite · React Flow"],
             ].map(([k, v], i) => (
               <div key={k} className="flex items-center justify-between px-5 py-3.5" style={{ borderTop: i > 0 ? "1px solid var(--c-border)" : "none" }}>
